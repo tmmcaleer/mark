@@ -1,0 +1,43 @@
+{
+	"category" : "suite-plugin",
+	"name": "com.avid.sample.notification",
+	"version": "0.0.1",
+	"displayName": "Sample Notification",
+	"description": "Demonstrate how plugin receives notifications from Media Composer",
+	"usesApi": [
+		"avid.mediacomposer.general"
+	],
+	"subscribesToChannels": [
+	],
+	"entitlements": [
+	],
+	"companyPrefix": "avid",
+	"appShortName": "sample.drag.notification",
+	"uiItems": [
+		{
+			"type": "dropdown",
+			"menuName": "Tools",
+			"id": "Sample notification",
+			"displayText": "Sample Notification",
+			"windowTitle": "Sample Notification",
+			"icon": "static/application.svg",
+			"url": "src/index.html"
+		}
+	],
+	"windowSize": {
+		"initial": {
+			"width": "600",
+			"height": "200"
+		},
+		"minimum": {
+			"width": "600",
+			"height": "200"
+		}
+	},
+	"targetHosts": [
+		"MediaComposer"
+	],
+	"allowedDomains": [],
+	"windowStyle": "floating",
+	"singleton": true
+}

@@ -1,0 +1,45 @@
+{
+	"category" : "suite-plugin",
+	"name": "com.avid.sample.helper",
+	"version": "0.0.1",
+	"displayName": "Helper Demo",
+	"description": "Demonstrate localhost helper service connection",
+	"usesApi": [
+		"avid.mediacomposer.general"
+	],
+	"subscribesToChannels": [
+	],
+	"entitlements": [
+	],
+	"companyPrefix": "avid",
+	"appShortName": "sample.local.helper",
+	"uiItems": [
+		{
+			"type": "dropdown",
+			"menuName": "Tools",
+			"id": "entry",
+			"displayText": "Helper",
+			"windowTitle": "Helper Demo",
+			"icon": "static/application.svg",
+			"url": "http://localhost:3006"
+		}
+	],
+	"windowSize": {
+		"initial": {
+			"width": "600",
+			"height": "200"
+		},
+		"minimum": {
+			"width": "600",
+			"height": "200"
+		}
+	},
+	"targetHosts": [
+		"MediaComposer"
+	],
+	"allowedDomains": [
+		"localhost:3006"
+	],
+	"windowStyle": "floating",
+	"singleton": true
+}

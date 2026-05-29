@@ -1,0 +1,41 @@
+{
+	"category" : "suite-plugin",
+	"name": "com.avid.sample.plugin",
+	"version": "0.0.2",
+	"displayName": "Remote URL sample",
+	"description": "Simple remote URL sample",
+	"usesApi": [
+		"avid.mediacomposer.general"
+	],
+	"subscribesToChannels": [
+	],
+	"entitlements": [
+	],
+	"companyPrefix": "avid",
+	"appShortName": "sample.remote.url",
+	"uiItems": [
+		{
+			"type": "dropdown",
+			"menuName": "Tools",
+			"id": "api sample",
+			"displayText": "Simple Echo",
+			"windowTitle": "Echo",
+			"icon": "static/application.svg",
+			"url": "http://localhost:3000"
+		}
+	],
+	"windowSize": {
+		"initial": {
+			"width": "600",
+			"height": "200"
+		}
+	},
+	"targetHosts": [
+		"MediaComposer"
+	],
+	"allowedDomains": [
+		"localhost:3000"
+	],
+	"windowStyle": "floating",
+	"singleton": true
+}

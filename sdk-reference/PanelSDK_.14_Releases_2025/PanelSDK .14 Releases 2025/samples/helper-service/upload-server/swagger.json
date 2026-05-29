@@ -1,0 +1,43 @@
+{
+    "swagger": "2.0",
+    "info": {
+      "version": "1.0.0",
+      "title": "File Upload API",
+      "description": "API for uploading files using Node.js and Multer"
+    },
+    "basePath": "/",
+    "schemes": [
+      "http"
+    ],
+    "paths": {
+      "/upload": {
+        "post": {
+          "summary": "Upload a file",
+          "consumes": [
+            "multipart/form-data"
+          ],
+          "produces": [
+            "application/json"
+          ],
+          "parameters": [
+            {
+              "name": "file",
+              "in": "formData",
+              "description": "The file to upload",
+              "required": true,
+              "type": "file"
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "File uploaded successfully"
+            },
+            "400": {
+              "description": "Bad request - no file uploaded"
+            }
+          }
+        }
+      }
+    }
+  }
+  

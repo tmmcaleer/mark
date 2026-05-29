@@ -1,0 +1,43 @@
+{
+	"category" : "suite-plugin",
+	"name": "com.avid.sample.helloworld",
+	"version": "0.0.1",
+	"displayName": "Hello World Sample",
+	"description": "Simple Hello World web page example",
+	"usesApi": [
+		"avid.mediacomposer.general"
+	],
+	"subscribesToChannels": [
+	],
+	"entitlements": [
+	],
+	"companyPrefix": "avid",
+	"appShortName": "sample.helloworld",
+	"uiItems": [
+		{
+			"type": "dropdown",
+			"menuName": "Tools",
+			"id": "helloworld",
+			"displayText": "Hello World Sample",
+			"windowTitle": "Hello World Window",
+			"icon": "src/static/application.svg",
+			"url": "src/index.html"
+		}
+	],
+	"windowSize": {
+		"initial": {
+			"width": "600",
+			"height": "600"
+		},
+		"minimum": {
+			"width": "600",
+			"height": "200"
+		}
+	},
+	"targetHosts": [
+		"MediaComposer"
+	],
+	"allowedDomains": [],
+	"windowStyle": "floating",
+	"singleton": true
+}

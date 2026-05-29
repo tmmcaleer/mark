@@ -1,0 +1,48 @@
+{
+	"category" : "suite-plugin",
+	"name": "Test if the plugin only loads URL from allowed domains",
+	"version": "0.0.1",
+	"displayName": "Test whitelist hosts",
+	"description": "Test if the plugin only loads URL from allowed domains",
+	"usesApi": [
+		"avid.mediacomposer.general"
+	],
+	"subscribesToChannels": [
+	],
+	"entitlements": [
+	],
+	"companyPrefix": "avid",
+	"appShortName": "test.domains",
+	"uiItems": [
+		{
+			"type": "dropdown",
+			"menuName": "Tools",
+			"id": "test domains",
+			"displayText": "Test domains",
+			"windowTitle": "Test domains",
+			"icon": "static/application.svg",
+			"url": "src/index.html"
+		}
+	],
+	"windowSize": {
+		"initial": {
+			"width": "600",
+			"height": "200"
+		},
+		"minimum": {
+			"width": "600",
+			"height": "200"
+		}
+	},
+	"targetHosts": [
+		"MediaComposer"
+	],
+	"allowedDomains": [
+		"google.com", 
+		"youtube.com", 
+		"qt.io", 
+		"developer.microsoft.com"
+	],
+	"windowStyle": "floating",
+	"singleton": true
+}

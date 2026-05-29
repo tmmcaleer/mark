@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Configure SRT Sample</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="./css/main.css">
+
+</head>
+
+<body>
+    <main>
+        <div class="page" id="parameter-container">
+            <div id="parameters"> 
+                <h1>Parameters</h1>
+                <div>
+                    <div class="param">
+                        <p>Stream Name</p>
+                        <input type="text" id="streamNameInput">
+                    </div>
+                    <div class="param">
+                        <p>Ip Address</p>
+                        <input type="text" id="ipAddressInput">
+                    </div>
+                    <div class="param">
+                        <p>Port</p>
+                        <input type="number" id="portInput">
+                    </div>
+                    <div class="param">
+                        <p>Password</p>
+                        <input type="text" id="passwordInput">
+                    </div>
+                    <div>
+                        <input type="checkbox" id="usePasswordInput" name="usePassword">
+                        <label for="usePasswordInput"> Use Password</label>
+                    </div>
+                    <div class="param">
+                        <p>Secret Suffix</p>
+                        <input type="text" id="secretSuffixInput">
+                    </div>
+                    <div class="param">
+                        <p>Latency</p>
+                        <input type="number" id="latencyInput">
+                    </div>
+                    <div class="param">
+                        <p>Quality Option</p>
+                        <select name="quality" id="qualityOptionSelect">
+                            <option value="0">Low</option>
+                            <option value="1">Medium</option>
+                            <option value="2">High</option>
+                        </select>
+                    </div>
+                    <div class="param">
+                        <p>Mode Option</p>
+                        <select name="quality" id="modeOptionSelect">
+                            <option value="0">Listener</option>
+                            <option value="1">Caller</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div id="submit-button-div">
+                <button type="submit" id="submit-button">Submit</button>
+            </div>
+        </div>
+
+        <div class="page">
+            <h1>Response</h1>
+            <div id="response-container"></div>
+        </div>
+    </main>
+    <script src="./main.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Avid MCAPI Sample</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="./css/main.css">
+    <!-- <link rel="stylesheet" href="./css/master-detail.css"> -->
+
+</head>
+
+<body>
+    <main>
+        <div class="page" id="master">
+            <header>
+                <h1>MCAPI</h1>
+            </header>
+            <main>
+                <ul id="mcapi-list"></ul>
+            </main>
+        </div>
+
+        <div class="page" id="parameter-container">
+            <header>
+                <h1>Parameters</h1>
+            </header>
+            <div id="parameters"> </div>
+            <div id="submit-button-div">
+                <button type="submit" id="submit-button">Submit</button>
+            </div>
+        </div>
+
+        <div class="page">
+            <h1>Response</h1>
+            <div id="response-container"></div>
+        </div>
+    </main>
+    <script src="./main.js"></script>
+</body>
+
+</html>

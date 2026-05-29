@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>ExportEDL Demo</title>
+    <meta name="viewport" content="width=device-width">
+
+</head>
+
+<body>
+
+    <div>
+        Helper service address: localhost:<input type="text" id="portNumberBox" disabled value="4500">
+        <input type="button" id="edit-port-but" value="Edit">
+    </div>
+
+
+    <main>
+        <label for="select-edl-setting">First choose an EDL Setting: </label>
+        <select name="setting" id="select-edl-setting">
+        </select>
+
+        <div id="drop-area">
+            <p>Then drop a sequence to export to EDL.</p>
+        </div>
+
+        <div id="dropped-content">
+        </div>
+        <div>
+            <input type="button" id="upload-button" value="Upload">
+        </div>
+
+    </main>
+    <script src="./main.js"></script>
+</body>
+
+</html>

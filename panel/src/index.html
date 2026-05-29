@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mark</title>
+  </head>
+  <body>
+    <main class="app-shell" data-view="drop">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Hi, I'm Mark.</h1>
+          <p id="view-subtitle">Drop clips in from an Avid bin.</p>
+        </div>
+        <button id="settings-toggle" class="icon-button secondary-button" type="button" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="settings-view">⚙</button>
+      </header>
+
+      <section id="drop-view" class="panel-view drop-view" aria-label="Drop clips">
+        <div class="drop-view-inner">
+          <div id="drop-area" class="drop-area">
+            <div id="drop-empty" class="drop-empty">
+              <strong>Drop clips</strong>
+              <span>or</span>
+              <button id="select-bin-button" class="text-button" type="button">Use selected bin clips</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="prompt-view" class="panel-view prompt-view hidden" aria-label="Marker prompt">
+        <div id="clip-tray" class="clip-tray" aria-label="Selected clips" title="Drop more clips here to add them">
+          <div class="clip-tray-header">
+            <strong id="asset-name" class="sr-only">No clips selected</strong>
+            <div id="selected-clip-list" class="selected-clip-list"></div>
+            <button id="clear-clips-button" class="icon-button secondary-button" type="button" aria-label="Clear selected clips" title="Clear selected clips">×</button>
+          </div>
+          <p id="asset-details" class="clip-tray-hint"></p>
+        </div>
+        <section class="prompt-section" aria-label="Marker prompt">
+          <div class="prompt-heading-row">
+            <label class="prompt-label" for="marker-prompt">What should I look for?</label>
+          </div>
+          <div class="prompt-input-wrap">
+            <textarea id="marker-prompt" rows="3" placeholder="exteriors of buildings"></textarea>
+            <div class="prompt-toolbar">
+              <div class="prompt-toolbar-left">
+                <button id="prompt-favorites-toggle" class="prompt-tool-button" type="button" aria-label="Favorite prompts" title="Favorite prompts" aria-expanded="false" aria-controls="favorite-prompts-popover">+</button>
+              </div>
+              <button id="analyze-button" class="submit-button primary-button" type="button" disabled aria-label="Find moments" title="Find moments">↑</button>
+            </div>
+            <div id="favorite-prompts-popover" class="favorite-prompts-popover hidden" aria-label="Favorite prompts">
+              <select id="favorite-prompt-select" aria-label="Favorite prompts">
+                <option value="">Favorite prompts</option>
+              </select>
+              <button id="save-favorite-prompt-button" class="icon-button secondary-button" type="button" aria-label="Save current prompt as favorite" title="Save current prompt as favorite">+</button>
+              <button id="delete-favorite-prompt-button" class="icon-button secondary-button" type="button" aria-label="Delete selected favorite prompt" title="Delete selected favorite prompt">−</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="busy-view" class="panel-view busy-view hidden" aria-label="Progress">
+        <div class="busy-panel">
+          <div class="busy-meter">
+            <div class="progress-wrap">
+              <div id="progress-bar" class="progress-bar"></div>
+            </div>
+          </div>
+          <span class="section-kicker">Working</span>
+          <h2 id="progress-stage">Preparing analysis</h2>
+          <p id="status-message" class="status-message">Drop clips in from an Avid bin, or use selected bin clips.</p>
+          <p id="progress-detail" class="progress-detail"></p>
+        </div>
+      </section>
+
+      <section id="review-view" class="panel-view review-view hidden" aria-label="Review marker suggestions">
+        <div class="review-layout">
+          <div class="review-overview">
+            <div class="preview-header">
+              <h2>Review</h2>
+              <p id="preview-count">No suggestions yet.</p>
+            </div>
+            <div id="review-clip-tabs" class="review-clip-tabs" aria-label="Analyzed clips"></div>
+          </div>
+
+          <section class="review-main" aria-label="Marker review">
+            <div id="preview-empty" class="preview-empty">I'll show suggested marker moments here, grouped by clip.</div>
+            <div id="review-content" class="review-content hidden">
+              <div id="suggestion-list" class="suggestion-list"></div>
+            </div>
+            <div class="apply-bar">
+              <button id="apply-button" class="apply-button" type="button" disabled>Apply Selected Markers</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="settings-view" class="panel-view settings-view hidden" aria-label="Settings">
+        <div class="settings-panel">
+          <div class="settings-heading">
+            <div>
+              <h2>Settings</h2>
+              <p>Configure helper connection, proxy export, and marker output.</p>
+            </div>
+          </div>
+
+          <div class="settings-stack">
+            <section class="settings-section" aria-labelledby="settings-connection-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-connection-heading">Connection</h3>
+                <p>Local helper endpoint and readiness.</p>
+              </div>
+              <div class="settings-fields settings-fields-two">
+                <label class="field" for="helper-url">
+                  <span>Helper URL</span>
+                  <input id="helper-url" value="http://localhost:4500" spellcheck="false">
+                </label>
+
+                <div class="field">
+                  <span>Helper status</span>
+                  <div class="status-control">
+                    <div class="status-list" aria-live="polite">
+                      <div class="status-line">
+                        <span id="helper-status-dot" class="status-dot" data-status="idle"></span>
+                        <span>Helper</span>
+                        <strong id="connection-status">Not checked</strong>
+                      </div>
+                      <div class="status-line">
+                        <span id="api-key-status-dot" class="status-dot" data-status="idle"></span>
+                        <span>API key</span>
+                        <strong id="api-key-status">Unknown</strong>
+                      </div>
+                    </div>
+                    <button id="check-helper-button" class="secondary-button" type="button">Check</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" aria-labelledby="settings-export-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-export-heading">Export</h3>
+                <p>Proxy setting used for temporary analysis media.</p>
+              </div>
+              <div class="settings-fields">
+                <div class="field">
+                  <label for="export-setting-select">Export setting</label>
+                  <div class="inline-control">
+                    <select id="export-setting-select" disabled>
+                      <option value="">Choose export setting...</option>
+                    </select>
+                    <button id="refresh-export-settings-button" class="secondary-button" type="button">Refresh</button>
+                  </div>
+                  <small id="export-setting-summary"></small>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" aria-labelledby="settings-style-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-style-heading">Marker output</h3>
+                <p>Global writing style for generated fields. The prompt still controls what Mark finds.</p>
+              </div>
+              <div class="settings-fields settings-fields-two">
+                <label class="field field-wide" for="marker-name-style">
+                  <span>Marker name guidance</span>
+                  <textarea id="marker-name-style" rows="2" spellcheck="true">Short editor-facing marker names. No confidence, no reasoning, no full sentences.</textarea>
+                </label>
+                <label class="field field-wide" for="marker-comment-style">
+                  <span>Comment guidance</span>
+                  <textarea id="marker-comment-style" rows="2" spellcheck="true">Concise Avid marker notes. No confidence, no reasoning, no full sentences.</textarea>
+                </label>
+              </div>
+            </section>
+
+            <div class="hidden" aria-hidden="true">
+              <strong id="project-rate">Unknown</strong>
+              <small id="project-details"></small>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <div id="export-setting-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="export-setting-dialog-title">
+      <div class="modal-panel">
+        <h2 id="export-setting-dialog-title">Choose an export setting</h2>
+        <p>Mark needs a small proxy export setting before it can analyze clips. Pick one in Settings, then run Find Moments again.</p>
+        <div class="modal-actions">
+          <button id="export-setting-dialog-settings-button" class="primary-button" type="button">Open Settings</button>
+          <button id="export-setting-dialog-close-button" class="secondary-button" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+    <script src="main.js"></script>
+  </body>
+</html>

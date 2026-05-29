@@ -1,0 +1,55 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "version": "1.0.0",
+    "title": "Plugin Helper Service",
+    "description": "API for local file access"
+  },
+  "basePath": "/",
+  "schemes": [
+    "http"
+  ],
+  "paths": {
+    "/upload": {
+      "post": {
+        "summary": "Upload a file file",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "params",
+            "in": "body",
+            "description": "The relative file path",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": [
+                "filePath"
+              ],
+              "properties": {
+                "filePath": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File uploaded successfully"
+          },
+          "400": {
+            "description": "Bad request - no file uploaded"
+          },
+          "500": {
+            "description": "Error reading file"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Drag and Drop Sample</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="./css/main.css">
+
+</head>
+
+<body>
+    <main>
+        <div id="drop-area">
+            <p>Drag Files from Media Composer and drop them here</p>
+        </div>
+
+        <div id="dropped-content">
+        </div>
+        <center>--------------------------------------------------------------------------</center>
+
+        <p>Drag this red box to Media Composer</p>
+        <div id="draggable-box" draggable="true" class="draggable">
+        </div>
+        <div id="drop-data-display"></div>
+        <center>--------------------------------------------------------------------------</center>
+        <div id="managed-clips">
+            
+            <div id="dropzone">
+                <p>Drop files from the OS to this box.<br>
+                    A link will be created below. You can then drag the link to Media Composer</p>
+                
+            </div>
+            <ul id="dropped-files"></ul>
+        </div>
+        <center>--------------------------------------------------------------------------</center>
+
+
+ 
+
+        <script>
+            var draggable = document.getElementById('draggable-box');
+            draggable.addEventListener('dragstart', function (event) {
+                // Set the custom JSON data for the dragged object
+                var data = {
+                    accessToken: mcapi.getAccessToken(), // required by MC
+                    eventData: { // optional, eventData will be included in the notification coming back from MC
+                        action: 'custom',
+                        param1: 'abc',
+                        param2: 123
+                    }
+                };
+                event.dataTransfer.setData('text/x.avid.panel-sdk-plugin-asset-list+json', JSON.stringify(data));
+
+            });
+        </script>
+    </main>
+    <script src="./main.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,44 @@
+{
+  "category": "suite-plugin",
+  "name": "com.mcdiva.mark",
+  "version": "0.1.0",
+  "displayName": "Mark",
+  "description": "Create Avid markers with TwelveLabs analysis",
+  "usesApi": [
+    "avid.mediacomposer.general"
+  ],
+  "subscribesToChannels": [],
+  "entitlements": [],
+  "companyPrefix": "mcdiva",
+  "appShortName": "mark",
+  "uiItems": [
+    {
+      "type": "dropdown",
+      "menuName": "Tools",
+      "id": "mark",
+      "displayText": "Mark",
+      "windowTitle": "Mark",
+      "icon": "static/application.svg",
+      "url": "src/index.html"
+    }
+  ],
+  "windowSize": {
+    "initial": {
+      "width": "980",
+      "height": "720"
+    },
+    "minimum": {
+      "width": "720",
+      "height": "520"
+    }
+  },
+  "targetHosts": [
+    "MediaComposer"
+  ],
+  "allowedDomains": [
+    "localhost:4500",
+    "127.0.0.1:4500"
+  ],
+  "windowStyle": "floating",
+  "singleton": true
+}

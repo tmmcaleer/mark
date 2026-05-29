@@ -1,0 +1,34 @@
+{
+  "name": "sample-configure-srt-stream",
+  "version": "0.2.0",
+  "description": "Sample application to demonstrate how to use configureSRTStream API",
+  "private": true,
+  "scripts": {
+    "test": "echo \"Error: no test sepcified\" && exit 1",
+    "build": "webpack --config webpack.config.js",
+    "copy-grpc-web": "mkdirp ./src/grpc-web && copyfiles -V -u 1 ../../grpc-web/*.js ./src/grpc-web",
+    "copy-resource": "mkdirp dist/app && copyfiles -V -u 1 ./resource/avid-manifest.json ./resource/**/* ./dist/app && copyfiles -V -u 1 ./src/*.html ./dist/app/src && copyfiles -V -u 1 ./resource/static/**/* ./dist/app/src && copyfiles -V -u 1 ./src/css/main.css ./dist/app/src",
+    "prebuild": "npm run copy-grpc-web && npm run copy-resource",
+    "clean-grpc-web": "rimraf ./src/grpc-web",
+    "clean-dist": "rimraf ./dist",
+    "clean-node-modules": "(rm -rf node_modules) || (del /s /q node_modules && rmdir /s /q node_modules)",
+    "clean-packages": "rimraf ./dist/avpi",
+    "clean-dev": "npm run clean-grpc-web && npm run clean-dist",
+    "clean-all": "npm run clean-grpc-web && npm run clean-dist && npm run clean-node-modules",
+    "prepackage": "npm run build && npm run clean-packages",
+    "package": "mkdirp dist/avpi && npm-build-zip --source=dist/app --destination=dist/avpi",
+    "postpackage": "renamer --path-element ext --find zip --replace avpi dist/avpi/*"
+  },
+  "devDependencies": {
+    "@grpc/grpc-js": "^1.13.3",
+    "@grpc/proto-loader": "~0.5.4",
+    "async": "~1.5.2",
+    "css-loader": "^6.5.1",
+    "google-protobuf": "~3.14.0",
+    "grpc-web": "~1.3.0",
+    "lodash": "~4.17.0",
+    "style-loader": "^3.3.1",
+    "webpack": "^5.67.0",
+    "webpack-cli": "^4.9.2"
+  }
+}

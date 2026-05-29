@@ -1,0 +1,25 @@
+body {
+    font-family: Helvetica, Arial, sans-serif;
+    text-align: left;
+    font-size: 14px;
+  }
+
+h1 {
+    font-size: 20px;
+    margin: 20px;
+}
+
+#mcapi-list {
+    font-size: 18px;
+}
+
+p {
+    padding: 20px;
+    margin: 30px auto;
+    width: 50%;
+    font-size: 14px;
+}
+
+pre {
+    font-size: 11px;
+}

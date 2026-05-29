@@ -1,0 +1,44 @@
+{
+	"category": "suite-plugin",
+	"name": "com.avid.sample.configuresrt",
+	"version": "0.1.0",
+	"displayName": "Configure SRT Sample",
+	"description": "Demonstrate Configure SRT",
+	"usesApi": [
+		"avid.mediacomposer.general",
+		"avid.mediacomposer.SRT"
+	],
+	"subscribesToChannels": [
+	],
+	"entitlements": [
+	],
+	"companyPrefix": "avid",
+	"appShortName": "sample.configuresrt",
+	"uiItems": [
+		{
+			"type": "dropdown",
+			"menuName": "Tools",
+			"id": "com.avid.sample.configuresrt",
+			"displayText": "Configure SRT Demo",
+			"windowTitle": "Configure SRT Demo",
+			"icon": "static/application.svg",
+			"url": "src/index.html"
+		}
+	],
+	"windowSize": {
+		"initial": {
+			"width": "640",
+			"height": "730"
+		},
+		"minimum": {
+			"width": "640",
+			"height": "730"
+		}
+	},
+	"targetHosts": [
+		"MediaComposer"
+	],
+	"allowedDomains": [],
+	"windowStyle": "floating",
+	"singleton": true
+}

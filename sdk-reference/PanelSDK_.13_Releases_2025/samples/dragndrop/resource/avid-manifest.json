@@ -1,0 +1,45 @@
+{
+	"category" : "suite-plugin",
+	"name": "com.avid.sample.drag.and.drop",
+	"version": "0.0.1",
+	"displayName": "Sample Drag and Drop",
+	"description": "Demonstrate drag and drop",
+	"usesApi": [
+		"avid.mediacomposer.general"
+	],
+	"subscribesToChannels": [
+	],
+	"entitlements": [
+	],
+	"companyPrefix": "avid",
+	"appShortName": "sample.drag.and.drop",
+	"uiItems": [
+		{
+			"type": "dropdown",
+			"menuName": "Tools",
+			"id": "Sample DND",
+			"displayText": "Sample drag and drop",
+			"windowTitle": "Sample drag and drop",
+			"icon": "static/application.svg",
+			"url": "http://localhost:3006"
+		}
+	],
+	"windowSize": {
+		"initial": {
+			"width": "600",
+			"height": "200"
+		},
+		"minimum": {
+			"width": "600",
+			"height": "200"
+		}
+	},
+	"targetHosts": [
+		"MediaComposer"
+	],
+	"allowedDomains": [
+		"localhost:3006"
+	],
+	"windowStyle": "floating",
+	"singleton": true
+}
