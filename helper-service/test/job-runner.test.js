@@ -101,6 +101,23 @@ test("allows oversized inputs when media prep is enabled", function () {
   assert.equal(data.size, 101);
 });
 
+test("normalizes Premiere media source kinds", function () {
+  const data = validateJobRequest({
+    filePath: "/tmp/proxy.mp4",
+    prompt: "make markers",
+    mediaSourceKind: "premiere-sequence-export"
+  }, {
+    fs: fsWithStat(function stat() {
+      return {
+        isFile: () => true,
+        size: 10
+      };
+    })
+  });
+
+  assert.equal(data.mediaSourceKind, "premiere-sequence-export");
+});
+
 test("validates optional marker output style", function () {
   const data = validateJobRequest({
     filePath: "/tmp/proxy.mp4",

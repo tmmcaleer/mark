@@ -34,6 +34,15 @@ function normalizeMediaSourceKind(value) {
   if (text === "repository-proxy" || text === "repository" || text === "proxy") {
     return "repository-proxy";
   }
+  if (text === "premiere-source-path" || text === "premiere-source" || text === "premiere-media") {
+    return "premiere-source-path";
+  }
+  if (text === "premiere-proxy" || text === "premiere-attached-proxy") {
+    return "premiere-proxy";
+  }
+  if (text === "premiere-sequence-export" || text === "premiere-export" || text === "sequence-export") {
+    return "premiere-sequence-export";
+  }
   return "unknown";
 }
 

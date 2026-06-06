@@ -1,27 +1,74 @@
-.premiere-shell {
+.app-shell[data-host="premiere"] {
   min-height: 100vh;
 }
 
-.premiere-panel {
+.app-shell[data-host="premiere"] .drop-empty {
+  gap: 14px;
+  max-width: 520px;
+  text-align: center;
+}
+
+.premiere-host-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-caption);
+}
+
+.premiere-source-actions {
   display: flex;
-  min-height: 0;
-  padding: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
 }
 
-.premiere-status-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+.premiere-source-actions button {
+  min-width: 150px;
+}
+
+.selected-clip-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  max-width: 220px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--surface-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.suggestion-time {
+  color: var(--muted);
+  font-size: var(--type-caption);
+}
+
+.suggestion-title-input,
+.suggestion-comment-input {
   width: 100%;
-  align-content: start;
 }
 
-.settings-section-wide {
-  grid-column: 1 / -1;
+.suggestion-card.is-muted {
+  opacity: 0.58;
+}
+
+.app-shell[data-host="premiere"] #favorite-prompts-popover,
+.app-shell[data-host="premiere"] #subclip-options,
+.app-shell[data-host="premiere"] #export-setting-dialog {
+  display: none;
 }
 
 @media (max-width: 760px) {
-  .premiere-status-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .premiere-source-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

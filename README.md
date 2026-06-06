@@ -10,7 +10,7 @@ Panel SDK Drop 13 files in `sdk-reference/PanelSDK_.13_Releases_2025`.
 ## Layout
 
 - `panel/` - Avid panel web app and `.avpi` packaging scripts.
-- `premiere/` - Adobe Premiere Pro UXP scaffold for the future Mark host.
+- `premiere/` - Adobe Premiere Pro UXP panel source for the Mark Premiere host.
 - `helper-service/` - Local service with filesystem access and the TwelveLabs API key.
 - `sdk-reference/` - Avid Panel SDK reference drops.
 
@@ -78,9 +78,28 @@ scripts/build-premiere-uxp.sh
 ```
 
 Load `build-temp/premiere-uxp/mark-premiere` with Adobe's UXP Developer Tool.
-The Premiere target is currently an adapter scaffold: it can check the active
-project/sequence, check the shared helper, and run a marker-write smoke test,
-but the full Mark analysis UI still runs through the Avid panel.
+The Premiere target reuses the Mark panel HTML/CSS and talks to the shared
+helper at `http://localhost:4500`. In Premiere Pro 25.6 or newer, open a
+project, select local source media in the Project panel or selected timeline
+clips, then click `Use Selection` in Mark. Mark sends direct local media paths
+or attached proxy paths to the helper, shows marker proposals in the shared
+review UI, and applies selected markers back to the selected Premiere
+ProjectItem.
+
+If direct media is not usable, Mark Premiere v1 can export the active sequence
+through Premiere UXP `EncoderManager`. Set an Adobe Media Encoder `.epr` proxy
+preset path in Mark settings, then click `Export Active Sequence`. The export is
+written into the helper export directory and the reviewed markers are applied to
+the active sequence.
+
+Premiere parity gaps in v1:
+
+- Subclip proposal review can run through the helper, but Premiere subclip
+  creation is disabled until a clean UXP equivalent is selected and smoke
+  tested.
+- Active-sequence proxy export requires a user-provided `.epr` preset path.
+- Premiere verification must be manual in Premiere Pro 25.6+ via UXP Developer
+  Tool; Avid AVPI rebuilds do not prove the Premiere plugin.
 
 ## Production Release Practice
 
