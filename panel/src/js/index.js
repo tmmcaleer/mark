@@ -33,6 +33,8 @@ import {
 import { MCAPIClient } from "../grpc-web/MCAPI_grpc_web_pb.js";
 
 import "../css/main.css";
+import { createAvidHost } from "./hosts/avid-host.mjs";
+import { createHelperClient } from "./shared/helper-client.mjs";
 import {
   MARKER_COLORS,
   clampMarker,
@@ -160,6 +162,8 @@ const MARKER_COLOR_HEX = {
 };
 
 let client;
+let host;
+let helperClient;
 let pollTimer = null;
 
 const state = {
@@ -1478,41 +1482,17 @@ function configuredExportSettingName(config) {
 }
 
 function getMetadata() {
-  return {
-    accessToken: mcapi.getAccessToken()
-  };
+  return host.getMetadata();
 }
 
 function requestJson(method, path, body) {
-  const xhr = new XMLHttpRequest();
-  const url = `${helperBaseUrl()}${path}`;
+  return helperClient.requestJson(method, path, body);
+}
 
-  return new Promise(function request(resolve, reject) {
-    xhr.open(method, url, true);
-    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-    xhr.onload = function onload() {
-      let payload = null;
-      try {
-        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
-      } catch (error) {
-        reject(new Error(`Invalid helper response from ${url}`));
-        return;
-      }
-
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(payload);
-      } else {
-        const message = payload && payload.error && payload.error.message
-          ? payload.error.message
-          : `Helper request failed with HTTP ${xhr.status}`;
-        reject(new Error(message));
-      }
-    };
-    xhr.onerror = function onerror() {
-      reject(new Error(`Cannot reach helper at ${helperBaseUrl()}`));
-    };
-    xhr.send(body ? JSON.stringify(body) : undefined);
-  });
+function reportHostError(code, message) {
+  if (host && typeof host.reportError === "function") {
+    host.reportError(code, message);
+  }
 }
 
 function titleCase(value) {
@@ -2504,7 +2484,7 @@ function loadProjectInfo() {
     client.getOpenProjectInfo(request, getMetadata(), function onProjectInfo(err, response) {
       if (err) {
         reject(new Error(`Project info failed: ${err.message}`));
-        mcapi.reportError(err.code, err.message);
+        reportHostError(err.code, err.message);
         return;
       }
 
@@ -2865,7 +2845,7 @@ function getExportSettings() {
           error.avidErrorType = CommandErrorType.MC_EXPORTSETTINGSNOTFOUND;
         }
         reject(error);
-        mcapi.reportError(err.code, err.message);
+        reportHostError(err.code, err.message);
         return;
       }
 
@@ -3176,7 +3156,7 @@ function exportProxyForQueueItem(item) {
       const message = formatExportStartError(err, exportSettingsName);
       failQueueItem(item, message);
       pumpQueue();
-      mcapi.reportError(err.code, err.message);
+      reportHostError(err.code, err.message);
       return;
     }
 
@@ -3574,7 +3554,7 @@ function exportProxyForClip(assetIndex) {
       const message = formatExportStartError(err, exportSettingsName);
       markClipFailed(assetIndex, message);
       processNextProxySource();
-      mcapi.reportError(err.code, err.message);
+      reportHostError(err.code, err.message);
       return;
     }
 
@@ -4138,7 +4118,7 @@ function writeMarkerGroupAttempt(groups, groupIndex, totals, candidateIndex) {
       asset.message = debugMessage;
       totals.debugMessages.push(debugMessage);
       totals.failed += 1;
-      mcapi.reportError(err.code, err.message);
+      reportHostError(err.code, err.message);
       renderPreview();
       setStatus(debugMessage, true);
       applyMarkerGroup(groups, groupIndex + 1, totals);
@@ -4260,7 +4240,7 @@ function verifyAppliedMarkers(asset, expectedMarkers, candidate, callback) {
 
   client.getMarkers(request, getMetadata(), function onGetMarkers(err, response) {
     if (err) {
-      mcapi.reportError(err.code, err.message);
+      reportHostError(err.code, err.message);
       callback(false, {
         missingCount: expectedMarkers.length,
         returnedCount: 0,
@@ -5308,16 +5288,19 @@ function registerEvents() {
     }
   });
 
-  mcapi.onEvent.connect(function onEvent(eventName, eventData) {
-    if (eventName === "ExportFileFinished") {
-      handleExportFinished(eventData);
-    }
-  });
+  host.onExportFileFinished(handleExportFinished);
 }
 
 document.addEventListener("DOMContentLoaded", function main() {
   initDom();
-  client = new MCAPIClient(mcapi.getGatewayServerAddress(), null, null);
+  host = createAvidHost({
+    mcapi,
+    MCAPIClient
+  });
+  client = host.client;
+  helperClient = createHelperClient({
+    getBaseUrl: helperBaseUrl
+  });
   loadMarkerOutputStyle();
   loadReviewThumbnailSize();
   renderAvidMetadataColumnOptions();

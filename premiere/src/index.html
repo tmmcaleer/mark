@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mark</title>
+    <link rel="stylesheet" href="main.css">
+    <link rel="stylesheet" href="premiere.css">
+  </head>
+  <body>
+    <main class="app-shell premiere-shell" data-view="drop">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Hi, I'm Mark.</h1>
+        </div>
+      </header>
+
+      <section class="panel-view premiere-panel" aria-label="Premiere Pro status">
+        <div class="premiere-status-grid">
+          <section class="settings-section">
+            <div class="settings-section-heading">
+              <h3>Premiere Pro</h3>
+              <p id="premiere-summary">Checking active project...</p>
+            </div>
+            <div class="settings-fields">
+              <button id="refresh-host-button" class="secondary-button" type="button">Refresh</button>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-heading">
+              <h3>Mark helper</h3>
+              <p id="helper-summary">Checking helper...</p>
+            </div>
+            <div class="settings-fields">
+              <button id="check-helper-button" class="secondary-button" type="button">Check Helper</button>
+            </div>
+          </section>
+
+          <section class="settings-section settings-section-wide">
+            <div class="settings-section-heading">
+              <h3>Adapter smoke test</h3>
+              <p id="marker-summary">Writes a single test marker to the active sequence. Full Mark analysis still runs through the Avid panel until the shared UI is connected to this adapter.</p>
+            </div>
+            <div class="settings-fields">
+              <button id="apply-sample-marker-button" class="primary-button" type="button">Apply Test Marker</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    </main>
+
+    <script src="premiere-host-adapter.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>

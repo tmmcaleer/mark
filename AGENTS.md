@@ -11,9 +11,9 @@ state, consider how the change will work on both platforms. Keep host-specific
 APIs behind adapters instead of mixing Avid or Premiere calls into shared UI and
 workflow code.
 
-Until the Premiere target exists, Avid remains the only runnable package in this
-repo. Do not claim a change has been verified in Premiere unless a Premiere
-plugin build and manual Premiere smoke test were actually run.
+The Premiere target is currently a UXP scaffold. Do not claim a change has been
+verified in Premiere unless a Premiere plugin build and manual Premiere smoke
+test were actually run.
 
 Whenever making changes to panel code, rebuild the AVPI and copy it to:
 
@@ -26,6 +26,15 @@ Preferred local rebuild command:
 ```sh
 scripts/install-dev-avpi-and-helper.sh /Users/admin/Github/mark --skip-helper
 ```
+
+Premiere UXP development bundle command:
+
+```sh
+scripts/build-premiere-uxp.sh
+```
+
+Load the generated `build-temp/premiere-uxp/mark-premiere` folder with Adobe's
+UXP Developer Tool for Premiere Pro testing.
 
 For a full local demo refresh, use:
 

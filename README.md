@@ -10,6 +10,7 @@ Panel SDK Drop 13 files in `sdk-reference/PanelSDK_.13_Releases_2025`.
 ## Layout
 
 - `panel/` - Avid panel web app and `.avpi` packaging scripts.
+- `premiere/` - Adobe Premiere Pro UXP scaffold for the future Mark host.
 - `helper-service/` - Local service with filesystem access and the TwelveLabs API key.
 - `sdk-reference/` - Avid Panel SDK reference drops.
 
@@ -70,6 +71,17 @@ This builds and installs the AVPI, stops the packaged helper LaunchAgent
 `com.mcdiva.mark.helper`, clears port `4500`, starts the dev helper, and checks
 `http://localhost:4500/health`.
 
+Build the Premiere Pro UXP development bundle:
+
+```sh
+scripts/build-premiere-uxp.sh
+```
+
+Load `build-temp/premiere-uxp/mark-premiere` with Adobe's UXP Developer Tool.
+The Premiere target is currently an adapter scaffold: it can check the active
+project/sequence, check the shared helper, and run a marker-write smoke test,
+but the full Mark analysis UI still runs through the Avid panel.
+
 ## Production Release Practice
 
 Build a signed production installer:
@@ -127,5 +139,6 @@ Helper environment variables:
 ```sh
 cd helper-service && npm test
 cd panel && npm run build
+node --test panel/test/*.test.mjs
 scripts/check-helper-service.sh
 ```
