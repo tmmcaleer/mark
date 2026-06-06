@@ -197,31 +197,7 @@
 
     const trackItems = await getTimelineSelection(sequence);
     trackItems.forEach(function addTrackItem(trackItem, index) {
-      const projectItem = safeCall("track project item", function getProjectItem() {
-        return typeof trackItem.getProjectItem === "function" ? trackItem.getProjectItem() : null;
-      }, null);
-      const target = normalizeProjectItem(app, projectItem, "Premiere timeline selection");
-      if (!target) {
-        return;
-      }
-      target.timeline = {
-        trackIndex: safeCall("track index", function getTrackIndex() {
-          return typeof trackItem.getTrackIndex === "function" ? trackItem.getTrackIndex() : null;
-        }, null),
-        startTime: tickSeconds(safeCall("start time", function getStart() {
-          return typeof trackItem.getStartTime === "function" ? trackItem.getStartTime() : null;
-        }, null)),
-        endTime: tickSeconds(safeCall("end time", function getEnd() {
-          return typeof trackItem.getEndTime === "function" ? trackItem.getEndTime() : null;
-        }, null)),
-        selectionIndex: index
-      };
-      target.columns = {
-        ...target.columns,
-        "Timeline Sequence": sequence && sequence.name || "",
-        "Timeline Start": String(target.timeline.startTime || 0),
-        "Timeline End": String(target.timeline.endTime || 0)
-      };
+      const target = normalizeTimelineTrackItem(app, trackItem, sequence, index);
       addTarget(target);
     });
 
@@ -247,7 +223,74 @@
     return Math.max(0.001, end - start);
   }
 
-  function markerOwnerForTarget(target) {
+  function normalizeTimelineTrackItem(app, trackItem, sequence, selectionIndex) {
+    const projectItem = safeCall("track project item", function getProjectItem() {
+      return typeof trackItem.getProjectItem === "function" ? trackItem.getProjectItem() : null;
+    }, null);
+    const target = normalizeProjectItem(app, projectItem, "Premiere timeline selection");
+    if (!target) {
+      return null;
+    }
+
+    const trackStart = tickSeconds(safeCall("start time", function getStart() {
+      return typeof trackItem.getStartTime === "function" ? trackItem.getStartTime() : null;
+    }, null));
+    const trackEnd = tickSeconds(safeCall("end time", function getEnd() {
+      return typeof trackItem.getEndTime === "function" ? trackItem.getEndTime() : null;
+    }, null));
+    const sourceIn = tickSeconds(safeCall("in point", function getInPoint() {
+      return typeof trackItem.getInPoint === "function" ? trackItem.getInPoint() : null;
+    }, null));
+    const trackIndex = safeCall("track index", function getTrackIndex() {
+      return typeof trackItem.getTrackIndex === "function" ? trackItem.getTrackIndex() : null;
+    }, null);
+    const sequenceId = sequence && (sequence.guid || sequence.name) || "active-sequence";
+    const timelineId = [
+      target.id,
+      sequenceId,
+      trackIndex === null ? "track" : trackIndex,
+      trackStart.toFixed(3),
+      selectionIndex
+    ].join(":");
+    const timelineName = `${target.displayName || target.name} @ ${trackStart.toFixed(2)}s`;
+
+    storedTargets.set(timelineId, {
+      kind: "sequence",
+      sequence,
+      name: sequence && sequence.name || "active sequence",
+      timeOffsetSeconds: trackStart - sourceIn
+    });
+
+    return {
+      ...target,
+      id: timelineId,
+      displayName: timelineName,
+      source: "premiere-timeline-selection",
+      columns: {
+        ...target.columns,
+        "Premiere Source": "Premiere timeline selection",
+        "Timeline Sequence": sequence && sequence.name || "",
+        "Timeline Start": String(trackStart || 0),
+        "Timeline End": String(trackEnd || 0),
+        "Timeline Source In": String(sourceIn || 0)
+      },
+      timeline: {
+        trackIndex,
+        startTime: trackStart,
+        endTime: trackEnd,
+        sourceIn,
+        selectionIndex
+      },
+      target: {
+        id: timelineId,
+        kind: "sequence",
+        name: sequence && sequence.name || "active sequence",
+        timeOffsetSeconds: trackStart - sourceIn
+      }
+    };
+  }
+
+  function markerTargetForTarget(target) {
     if (!target || !target.id) {
       return null;
     }
@@ -255,7 +298,11 @@
     if (!stored) {
       return null;
     }
-    return stored.kind === "sequence" ? stored.sequence : stored.item;
+    return {
+      owner: stored.kind === "sequence" ? stored.sequence : stored.item,
+      kind: stored.kind,
+      timeOffsetSeconds: Number(stored.timeOffsetSeconds || target.timeOffsetSeconds) || 0
+    };
   }
 
   async function applyMarkerGroups(groups) {
@@ -273,14 +320,15 @@
     const missingTargets = [];
     const ok = project.executeTransaction(function addMarkMarkers(compoundAction) {
       markerGroups.forEach(function addGroup(group) {
-        const owner = markerOwnerForTarget(group.target);
-        if (!owner) {
+        const markerTarget = markerTargetForTarget(group.target);
+        if (!markerTarget || !markerTarget.owner) {
           missingTargets.push(group.target && group.target.name || "Premiere target");
           return;
         }
-        const markerCollection = app.Markers.getMarkers(owner);
+        const markerCollection = app.Markers.getMarkers(markerTarget.owner);
         (group.markers || []).forEach(function addMarker(marker, index) {
-          const start = app.TickTime.createWithSeconds(Math.max(0, Number(marker.startTime) || 0));
+          const startSeconds = Math.max(0, (Number(marker.startTime) || 0) + markerTarget.timeOffsetSeconds);
+          const start = app.TickTime.createWithSeconds(startSeconds);
           const duration = app.TickTime.createWithSeconds(markerDurationSeconds(marker));
           const action = markerCollection.createAddMarkerAction(
             marker.name || `Mark marker ${index + 1}`,

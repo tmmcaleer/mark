@@ -82,9 +82,10 @@ The Premiere target reuses the Mark panel HTML/CSS and talks to the shared
 helper at `http://localhost:4500`. In Premiere Pro 25.6 or newer, open a
 project, select local source media in the Project panel or selected timeline
 clips, then click `Use Selection` in Mark. Mark sends direct local media paths
-or attached proxy paths to the helper, shows marker proposals in the shared
-review UI, and applies selected markers back to the selected Premiere
-ProjectItem.
+or attached proxy paths to the helper and shows marker proposals in the shared
+review UI. Project panel selections apply reviewed markers back to the source
+ProjectItem; timeline selections apply reviewed markers to the active sequence
+at the selected clip's sequence position.
 
 If direct media is not usable, Mark Premiere v1 can export the active sequence
 through Premiere UXP `EncoderManager`. Set an Adobe Media Encoder `.epr` proxy
