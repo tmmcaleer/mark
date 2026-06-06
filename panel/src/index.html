@@ -9,19 +9,26 @@
     <main class="app-shell" data-view="drop">
       <header class="topbar">
         <div class="brand">
-          <h1>Hi, I'm Mark.</h1>
-          <p id="view-subtitle">Drop clips in from an Avid bin.</p>
+          <h1 id="view-title">Hi, I'm Mark.</h1>
         </div>
-        <button id="settings-toggle" class="icon-button secondary-button" type="button" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="settings-view">⚙</button>
+        <div class="topbar-actions">
+          <button id="queue-toggle" class="icon-button secondary-button queue-toggle" type="button" aria-label="Render queue" title="Render queue" aria-expanded="false" aria-controls="queue-view">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M4 7h16"></path>
+              <path d="M4 12h16"></path>
+              <path d="M4 17h10"></path>
+            </svg>
+            <span id="queue-badge" class="queue-badge hidden">0</span>
+          </button>
+          <button id="settings-toggle" class="icon-button secondary-button" type="button" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="settings-view">⚙</button>
+        </div>
       </header>
 
       <section id="drop-view" class="panel-view drop-view" aria-label="Drop clips">
         <div class="drop-view-inner">
           <div id="drop-area" class="drop-area">
             <div id="drop-empty" class="drop-empty">
-              <strong>Drop clips</strong>
-              <span>or</span>
-              <button id="select-bin-button" class="text-button" type="button">Use selected bin clips</button>
+              <strong>Drop some clips and I'll take a look.</strong>
             </div>
           </div>
         </div>
@@ -32,7 +39,15 @@
           <div class="clip-tray-header">
             <strong id="asset-name" class="sr-only">No clips selected</strong>
             <div id="selected-clip-list" class="selected-clip-list"></div>
-            <button id="clear-clips-button" class="icon-button secondary-button" type="button" aria-label="Clear selected clips" title="Clear selected clips">×</button>
+            <button id="clear-clips-button" class="icon-button secondary-button" type="button" aria-label="Clear selected clips" title="Clear selected clips">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M3 6h18"></path>
+                <path d="M8 6V4h8v2"></path>
+                <path d="M6 6l1 15h10l1-15"></path>
+                <path d="M10 11v6"></path>
+                <path d="M14 11v6"></path>
+              </svg>
+            </button>
           </div>
           <p id="asset-details" class="clip-tray-hint"></p>
         </div>
@@ -44,16 +59,70 @@
             <textarea id="marker-prompt" rows="3" placeholder="exteriors of buildings"></textarea>
             <div class="prompt-toolbar">
               <div class="prompt-toolbar-left">
-                <button id="prompt-favorites-toggle" class="prompt-tool-button" type="button" aria-label="Favorite prompts" title="Favorite prompts" aria-expanded="false" aria-controls="favorite-prompts-popover">+</button>
+                <div class="workflow-switch prompt-workflow-switch" role="group" aria-label="Workflow">
+                  <button id="workflow-mode-markers" class="workflow-mode-button is-active" type="button" aria-pressed="true">Markers</button>
+                  <button id="workflow-mode-subclips" class="workflow-mode-button" type="button" aria-pressed="false">Subclips</button>
+                </div>
+                <button id="prompt-favorites-toggle" class="prompt-tool-button" type="button" aria-label="Prompt presets" title="Prompt presets" aria-expanded="false" aria-controls="favorite-prompts-popover">+</button>
+                <div id="subclip-options" class="subclip-options hidden" aria-label="Subclip options">
+                  <button id="subclip-options-toggle" class="subclip-options-pill" type="button" aria-label="Subclip settings" title="Subclip settings" aria-expanded="false" aria-controls="subclip-options-popover">
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                      <path d="M4 21v-7"></path>
+                      <path d="M4 10V3"></path>
+                      <path d="M12 21v-9"></path>
+                      <path d="M12 8V3"></path>
+                      <path d="M20 21v-5"></path>
+                      <path d="M20 12V3"></path>
+                      <path d="M2 14h4"></path>
+                      <path d="M10 8h4"></path>
+                      <path d="M18 16h4"></path>
+                    </svg>
+                  </button>
+                  <button id="subclip-duration-toggle" class="subclip-duration-pill hidden" type="button" aria-label="Custom clip length" title="Custom clip length" aria-expanded="false" aria-controls="subclip-options-popover">8-45s</button>
+                  <div id="subclip-options-popover" class="subclip-options-popover composer-popover hidden" aria-label="Subclip settings">
+                    <div class="popover-title">Subclip style</div>
+                    <div class="granularity-choice-list" role="group" aria-label="Subclip style">
+                      <button class="granularity-choice" type="button" data-granularity="broad">Broad</button>
+                      <button class="granularity-choice is-active" type="button" data-granularity="balanced">Balanced</button>
+                      <button class="granularity-choice" type="button" data-granularity="fine">Detailed</button>
+                      <button class="granularity-choice" type="button" data-granularity="scene">Scene</button>
+                    </div>
+                    <button id="custom-duration-toggle" class="custom-duration-toggle" type="button" aria-expanded="false" aria-controls="subclip-duration-fields">
+                      <span>Clip length</span>
+                      <strong>Default</strong>
+                    </button>
+                    <div id="subclip-duration-fields" class="duration-fields hidden" role="group" aria-label="Custom subclip length">
+                      <label class="toolbar-field toolbar-number-field" for="subclip-min-duration">
+                        <span>Min</span>
+                        <input id="subclip-min-duration" type="number" min="1" step="1" value="8">
+                        <small>sec</small>
+                      </label>
+                      <label class="toolbar-field toolbar-number-field" for="subclip-max-duration">
+                        <span>Max</span>
+                        <input id="subclip-max-duration" type="number" min="1" step="1" value="45">
+                        <small>sec</small>
+                      </label>
+                    </div>
+                    <select id="subclip-granularity" class="hidden-native-control" aria-hidden="true" tabindex="-1">
+                      <option value="fine">Detailed</option>
+                      <option value="balanced" selected>Balanced</option>
+                      <option value="broad">Broad</option>
+                      <option value="scene">Scene</option>
+                    </select>
+                  </div>
+                </div>
               </div>
               <button id="analyze-button" class="submit-button primary-button" type="button" disabled aria-label="Find moments" title="Find moments">↑</button>
             </div>
-            <div id="favorite-prompts-popover" class="favorite-prompts-popover hidden" aria-label="Favorite prompts">
-              <select id="favorite-prompt-select" aria-label="Favorite prompts">
-                <option value="">Favorite prompts</option>
+            <div id="favorite-prompts-popover" class="favorite-prompts-popover composer-popover hidden" aria-label="Prompt presets">
+              <div class="popover-title">Prompt presets</div>
+              <select id="favorite-prompt-select" aria-label="Prompt presets">
+                <option value="">Prompt presets</option>
               </select>
-              <button id="save-favorite-prompt-button" class="icon-button secondary-button" type="button" aria-label="Save current prompt as favorite" title="Save current prompt as favorite">+</button>
-              <button id="delete-favorite-prompt-button" class="icon-button secondary-button" type="button" aria-label="Delete selected favorite prompt" title="Delete selected favorite prompt">−</button>
+              <div class="favorite-prompts-actions">
+                <button id="save-favorite-prompt-button" class="preset-action-button" type="button" aria-label="Save current prompt as preset" title="Save current prompt as preset">Save</button>
+                <button id="delete-favorite-prompt-button" class="preset-action-button" type="button" aria-label="Delete selected prompt preset" title="Delete selected prompt preset">Delete</button>
+              </div>
             </div>
           </div>
         </section>
@@ -68,8 +137,16 @@
           </div>
           <span class="section-kicker">Working</span>
           <h2 id="progress-stage">Preparing analysis</h2>
-          <p id="status-message" class="status-message">Drop clips in from an Avid bin, or use selected bin clips.</p>
+          <p id="status-message" class="status-message">Drop some clips and I'll take a look.</p>
           <p id="progress-detail" class="progress-detail"></p>
+        </div>
+      </section>
+
+      <section id="queue-view" class="panel-view queue-view hidden" aria-label="Render queue">
+        <div class="queue-layout">
+          <p id="queue-summary" class="queue-summary">No active renders.</p>
+          <div id="queue-empty" class="queue-empty">No renders in the queue.</div>
+          <div id="queue-list" class="queue-list"></div>
         </div>
       </section>
 
@@ -77,8 +154,15 @@
         <div class="review-layout">
           <div class="review-overview">
             <div class="preview-header">
-              <h2>Review</h2>
-              <p id="preview-count">No suggestions yet.</p>
+              <div class="review-heading-row">
+                <div class="review-heading-copy">
+                  <h2>Review</h2>
+                  <p id="preview-count">No suggestions yet.</p>
+                </div>
+                <div class="review-heading-actions">
+                  <button id="discard-suggestions-button" class="icon-button secondary-button" type="button" aria-label="Discard suggestions and return to prompt" title="Discard suggestions">×</button>
+                </div>
+              </div>
             </div>
             <div id="review-clip-tabs" class="review-clip-tabs" aria-label="Analyzed clips"></div>
           </div>
@@ -97,50 +181,11 @@
 
       <section id="settings-view" class="panel-view settings-view hidden" aria-label="Settings">
         <div class="settings-panel">
-          <div class="settings-heading">
-            <div>
-              <h2>Settings</h2>
-              <p>Configure helper connection, proxy export, and marker output.</p>
-            </div>
-          </div>
-
           <div class="settings-stack">
-            <section class="settings-section" aria-labelledby="settings-connection-heading">
-              <div class="settings-section-heading">
-                <h3 id="settings-connection-heading">Connection</h3>
-                <p>Local helper endpoint and readiness.</p>
-              </div>
-              <div class="settings-fields settings-fields-two">
-                <label class="field" for="helper-url">
-                  <span>Helper URL</span>
-                  <input id="helper-url" value="http://localhost:4500" spellcheck="false">
-                </label>
-
-                <div class="field">
-                  <span>Helper status</span>
-                  <div class="status-control">
-                    <div class="status-list" aria-live="polite">
-                      <div class="status-line">
-                        <span id="helper-status-dot" class="status-dot" data-status="idle"></span>
-                        <span>Helper</span>
-                        <strong id="connection-status">Not checked</strong>
-                      </div>
-                      <div class="status-line">
-                        <span id="api-key-status-dot" class="status-dot" data-status="idle"></span>
-                        <span>API key</span>
-                        <strong id="api-key-status">Unknown</strong>
-                      </div>
-                    </div>
-                    <button id="check-helper-button" class="secondary-button" type="button">Check</button>
-                  </div>
-                </div>
-              </div>
-            </section>
-
             <section class="settings-section" aria-labelledby="settings-export-heading">
               <div class="settings-section-heading">
-                <h3 id="settings-export-heading">Export</h3>
-                <p>Proxy setting used for temporary analysis media.</p>
+                <h3 id="settings-export-heading">Proxy export</h3>
+                <p>Avid setting used for temporary analysis media.</p>
               </div>
               <div class="settings-fields">
                 <div class="field">
@@ -149,27 +194,217 @@
                     <select id="export-setting-select" disabled>
                       <option value="">Choose export setting...</option>
                     </select>
-                    <button id="refresh-export-settings-button" class="secondary-button" type="button">Refresh</button>
+                    <button id="refresh-export-settings-button" class="settings-refresh-button icon-button" type="button" aria-label="Reload Avid export settings" title="Reload Avid export settings">
+                      <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M21 12a9 9 0 0 1-15.2 6.5"></path>
+                        <path d="M3 12A9 9 0 0 1 18.2 5.5"></path>
+                        <path d="M18 2v4h4"></path>
+                        <path d="M6 22v-4H2"></path>
+                      </svg>
+                    </button>
                   </div>
                   <small id="export-setting-summary"></small>
                 </div>
               </div>
             </section>
 
+            <section class="settings-section" aria-labelledby="settings-proxy-repository-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-proxy-repository-heading">Existing proxies</h3>
+                <p>Optional lookup before Mark asks Avid to export a temporary proxy.</p>
+              </div>
+              <div class="settings-fields">
+                <label class="field checkbox-field" for="proxy-repository-enabled">
+                  <input id="proxy-repository-enabled" type="checkbox">
+                  <span>Use existing proxies before exporting</span>
+                </label>
+                <div id="proxy-repository-fields" class="proxy-repository-fields hidden">
+                  <div class="field field-wide">
+                    <span>Find by</span>
+                    <div class="proxy-match-options">
+                      <label><input id="proxy-match-source-path" type="checkbox" checked> Avid Source Path</label>
+                      <label><input id="proxy-match-source-file" type="checkbox" checked> Search folders by source file</label>
+                      <label><input id="proxy-match-clip-name" type="checkbox" checked> Search folders by clip name</label>
+                    </div>
+                    <small id="proxy-repository-summary"></small>
+                  </div>
+                  <label id="proxy-repository-roots-field" class="field field-wide" for="proxy-repository-roots">
+                    <span>Search folders or drives</span>
+                    <textarea id="proxy-repository-roots" rows="3" spellcheck="false" placeholder="/Volumes/Editorial Proxies"></textarea>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" aria-labelledby="settings-appearance-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-appearance-heading">Appearance</h3>
+                <p>Display preferences for review screens.</p>
+              </div>
+              <div class="settings-fields settings-fields-two">
+                <label class="field" for="review-thumbnail-size">
+                  <span>Review thumbnails</span>
+                  <select id="review-thumbnail-size">
+                    <option value="compact">Compact</option>
+                    <option value="comfortable" selected>Comfortable</option>
+                    <option value="large">Large</option>
+                  </select>
+                  <small>Applies to marker and subclip review thumbnails.</small>
+                </label>
+              </div>
+            </section>
+
             <section class="settings-section" aria-labelledby="settings-style-heading">
               <div class="settings-section-heading">
-                <h3 id="settings-style-heading">Marker output</h3>
-                <p>Global writing style for generated fields. The prompt still controls what Mark finds.</p>
+                <h3 id="settings-style-heading">Marker text</h3>
+                <p>Global writing rules. The prompt still controls what Mark finds.</p>
               </div>
               <div class="settings-fields settings-fields-two">
                 <label class="field field-wide" for="marker-name-style">
-                  <span>Marker name guidance</span>
-                  <textarea id="marker-name-style" rows="2" spellcheck="true">Short editor-facing marker names. No confidence, no reasoning, no full sentences.</textarea>
+                  <span>Marker names</span>
+                  <textarea id="marker-name-style" rows="2" spellcheck="true">Short marker names. No confidence or reasoning.</textarea>
                 </label>
                 <label class="field field-wide" for="marker-comment-style">
-                  <span>Comment guidance</span>
-                  <textarea id="marker-comment-style" rows="2" spellcheck="true">Concise Avid marker notes. No confidence, no reasoning, no full sentences.</textarea>
+                  <span>Marker notes</span>
+                  <textarea id="marker-comment-style" rows="2" spellcheck="true">Short marker notes. No confidence or reasoning.</textarea>
                 </label>
+              </div>
+            </section>
+
+            <section class="settings-section" aria-labelledby="settings-metadata-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-metadata-heading">Avid metadata context</h3>
+                <p>Optional bin columns added to TwelveLabs guidance for each clip.</p>
+              </div>
+              <div class="settings-fields">
+                <label class="field field-wide" for="avid-metadata-columns">
+                  <span>Prompt context columns</span>
+                  <select id="avid-metadata-columns" class="metadata-column-select" multiple size="6">
+                    <option value="Name">Name</option>
+                    <option value="Comments">Comments</option>
+                    <option value="Scene">Scene</option>
+                    <option value="Take">Take</option>
+                    <option value="Source File">Source File</option>
+                    <option value="Source Path">Source Path</option>
+                  </select>
+                  <small id="avid-metadata-summary">No Avid metadata will be added to prompts.</small>
+                </label>
+              </div>
+            </section>
+
+            <section class="settings-section" aria-labelledby="settings-subclip-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-subclip-heading">Subclips</h3>
+                <p>Defaults for proposed ranges and created Avid subclip names.</p>
+              </div>
+              <div class="settings-fields settings-fields-two">
+                <label class="field field-wide" for="subclip-summary-style">
+                  <span>Subclip summaries</span>
+                  <textarea id="subclip-summary-style" rows="2" spellcheck="true">Short summaries of why the section is useful. No confidence or reasoning.</textarea>
+                </label>
+                <div class="settings-subsection field-wide" aria-labelledby="subclip-defaults-settings-heading">
+                  <div class="settings-subsection-heading">
+                    <h4 id="subclip-defaults-settings-heading">Subclip defaults</h4>
+                    <small>Saved defaults for section density and length.</small>
+                  </div>
+                  <div class="settings-fields settings-fields-three">
+                    <label class="field" for="settings-subclip-granularity">
+                      <span>Style</span>
+                      <select id="settings-subclip-granularity">
+                        <option value="fine">Detailed</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="broad">Broad</option>
+                        <option value="scene">Scene</option>
+                      </select>
+                    </label>
+                    <label class="field" for="settings-subclip-min-duration">
+                      <span>Min sec</span>
+                      <input id="settings-subclip-min-duration" type="number" min="1" step="1" value="8">
+                    </label>
+                    <label class="field" for="settings-subclip-max-duration">
+                      <span>Max sec</span>
+                      <input id="settings-subclip-max-duration" type="number" min="1" step="1" value="45">
+                    </label>
+                  </div>
+                </div>
+                <div class="settings-subsection field-wide" aria-labelledby="subclip-name-settings-heading">
+                  <div class="settings-subsection-heading">
+                    <h4 id="subclip-name-settings-heading">Subclip names</h4>
+                    <small>Batch rename style for created Avid subclips.</small>
+                  </div>
+                  <div class="settings-fields settings-fields-four">
+                    <label class="field" for="subclip-name-delimiter">
+                      <span>Delimiter</span>
+                      <select id="subclip-name-delimiter">
+                        <option value=".">.</option>
+                        <option value=" ">Space</option>
+                        <option value="-">-</option>
+                        <option value="_">_</option>
+                      </select>
+                    </label>
+                    <label class="field" for="subclip-name-suffix">
+                      <span>Suffix</span>
+                      <input id="subclip-name-suffix" value="sub" spellcheck="false">
+                    </label>
+                    <label class="field" for="subclip-name-start">
+                      <span>Start</span>
+                      <input id="subclip-name-start" type="number" min="0" step="1" value="0">
+                    </label>
+                    <label class="field" for="subclip-name-padding">
+                      <span>Padding</span>
+                      <input id="subclip-name-padding" type="number" min="1" max="6" step="1" value="1">
+                    </label>
+                  </div>
+                  <small id="subclip-name-preview" class="subclip-name-preview">Clip.sub.0</small>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" id="settings-advanced" aria-labelledby="settings-advanced-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-advanced-heading">Advanced</h3>
+                <p>Local service, API readiness, and debug traces.</p>
+              </div>
+              <div class="settings-fields settings-fields-two">
+                <label class="field" for="helper-url">
+                  <span>Helper URL</span>
+                  <input id="helper-url" value="http://localhost:4500" spellcheck="false">
+                </label>
+
+                <div class="field">
+                  <span>Status</span>
+                  <div class="status-control">
+                    <div class="status-list" aria-live="polite">
+                      <div class="status-line">
+                        <span id="helper-status-dot" class="status-dot" data-status="idle"></span>
+                        <span>Helper</span>
+                        <strong id="connection-status" class="sr-only">Not checked</strong>
+                      </div>
+                      <div class="status-line">
+                        <span id="api-key-status-dot" class="status-dot" data-status="idle"></span>
+                        <span>API key</span>
+                        <strong id="api-key-status" class="sr-only">Unknown</strong>
+                      </div>
+                    </div>
+                    <button id="check-helper-button" class="settings-refresh-button icon-button" type="button" aria-label="Check status" title="Check status">
+                      <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M21 12a9 9 0 0 1-15.2 6.5"></path>
+                        <path d="M3 12A9 9 0 0 1 18.2 5.5"></path>
+                        <path d="M18 2v4h4"></path>
+                        <path d="M6 22v-4H2"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <label class="field checkbox-field" for="debug-panel-enabled">
+                  <input id="debug-panel-enabled" type="checkbox">
+                  <span>Show debug trace</span>
+                </label>
+                <div id="debug-panel-fields" class="debug-panel-fields hidden">
+                  <pre id="debug-panel-output" class="debug-panel-output">No debug events yet.</pre>
+                  <button id="debug-panel-clear" class="secondary-button" type="button">Clear trace</button>
+                </div>
               </div>
             </section>
 
@@ -191,6 +426,7 @@
         </div>
       </div>
     </div>
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     <script src="main.js"></script>
   </body>
 </html>

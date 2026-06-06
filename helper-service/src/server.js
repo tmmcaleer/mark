@@ -12,13 +12,23 @@ const {
   validateJobRequest
 } = require("./job-runner");
 const { MarkError } = require("./mark-error");
+const { resolveProxy } = require("./proxy-resolver");
+const {
+  cleanupJobThumbnails,
+  cleanupStaleThumbnailCache,
+  findJobThumbnail
+} = require("./thumbnails");
 
 const app = express();
 const jobs = new Map();
+const pendingJobs = [];
+let activeJobCount = 0;
+let runJobImpl = runJob;
 
 fs.mkdirSync(config.exportDestinationPath, {
   recursive: true
 });
+cleanupStaleThumbnailCache();
 
 app.use(cors({
   origin: true
@@ -42,8 +52,30 @@ app.get("/config", function getConfig(req, res) {
     cleanupExportedProxies: config.cleanupExportedProxies,
     supportsProxyPlayback: true,
     maxDirectUploadBytes: config.maxDirectUploadBytes,
+    maxConcurrentJobs: config.maxConcurrentJobs,
+    proxyRoots: config.proxyRoots,
+    proxyExtensions: config.proxyExtensions,
+    mediaPrepEnabled: config.mediaPrepEnabled,
+    mediaPrepDir: config.mediaPrepDir,
+    mediaTargetMaxBytes: config.mediaTargetMaxBytes,
+    mediaMaxWidth: config.mediaMaxWidth,
+    mediaVideoBitrate: config.mediaVideoBitrate,
+    mediaAudioBitrate: config.mediaAudioBitrate,
+    mediaChunkSeconds: config.mediaChunkSeconds,
+    mediaChunkOverlapSeconds: config.mediaChunkOverlapSeconds,
+    thumbnailsEnabled: config.thumbnailsEnabled,
+    thumbnailWidth: config.thumbnailWidth,
+    maxThumbnailsPerJob: config.maxThumbnailsPerJob,
     hasTwelveLabsApiKey: Boolean(config.twelveLabsApiKey)
   });
+});
+
+app.post("/proxy/resolve", function resolveProxyRoute(req, res) {
+  try {
+    res.json(resolveProxy(req.body));
+  } catch (error) {
+    sendError(res, error);
+  }
 });
 
 app.post("/jobs", function createJobRoute(req, res) {
@@ -69,18 +101,7 @@ app.post("/jobs", function createJobRoute(req, res) {
   const job = createJob(data);
   jobs.set(job.id, job);
   res.status(202).json(publicJob(job));
-
-  setImmediate(function startJob() {
-    runJob(job).catch(function catchRunError(error) {
-      job.status = "failed";
-      job.stage = "failed";
-      job.progress = 0;
-      job.error = {
-        code: error.code || "JOB_ERROR",
-        message: error.message
-      };
-    });
-  });
+  enqueueJob(job);
 });
 
 app.get("/jobs/:id", function getJobRoute(req, res) {
@@ -96,6 +117,73 @@ app.get("/jobs/:id", function getJobRoute(req, res) {
   }
 
   res.json(publicJob(job));
+});
+
+app.get("/jobs/:id/thumbnails/:fileName", function getJobThumbnailRoute(req, res) {
+  const job = jobs.get(req.params.id);
+  if (!job) {
+    res.status(404).json({
+      error: {
+        code: "JOB_NOT_FOUND",
+        message: "Job not found"
+      }
+    });
+    return;
+  }
+
+  const thumbnail = findJobThumbnail(job, req.params.fileName);
+  if (!thumbnail || !thumbnail.filePath) {
+    res.status(404).json({
+      error: {
+        code: "THUMBNAIL_NOT_FOUND",
+        message: "Thumbnail was not found"
+      }
+    });
+    return;
+  }
+
+  const thumbnailPath = path.resolve(thumbnail.filePath);
+  const thumbnailRoot = path.resolve(config.thumbnailsDir);
+  const relative = path.relative(thumbnailRoot, thumbnailPath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    res.status(403).json({
+      error: {
+        code: "THUMBNAIL_FORBIDDEN",
+        message: "Thumbnail path is outside the Mark thumbnail directory"
+      }
+    });
+    return;
+  }
+
+  let stat;
+  try {
+    stat = fs.statSync(thumbnailPath);
+  } catch (error) {
+    res.status(404).json({
+      error: {
+        code: "THUMBNAIL_NOT_FOUND",
+        message: "Thumbnail file was not found"
+      }
+    });
+    return;
+  }
+
+  if (!stat.isFile()) {
+    res.status(404).json({
+      error: {
+        code: "THUMBNAIL_NOT_FILE",
+        message: "Thumbnail path is not a file"
+      }
+    });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Length": stat.size,
+    "Content-Type": "image/jpeg",
+    "Cache-Control": "private, max-age=3600"
+  });
+  fs.createReadStream(thumbnailPath).pipe(res);
 });
 
 app.get("/jobs/:id/proxy", function getJobProxyRoute(req, res) {
@@ -174,9 +262,57 @@ app.delete("/jobs/:id", function deleteJobRoute(req, res) {
   cleanupExportedFile(job.filePath, {
     cleanupExportedProxies: true
   });
+  cleanupJobThumbnails(job);
+  const pendingIndex = pendingJobs.findIndex(function findPending(pendingJob) {
+    return pendingJob.id === job.id;
+  });
+  if (pendingIndex !== -1) {
+    pendingJobs.splice(pendingIndex, 1);
+  }
   jobs.delete(req.params.id);
   res.status(204).end();
 });
+
+function enqueueJob(job) {
+  pendingJobs.push(job);
+  startQueuedJobs();
+}
+
+function startQueuedJobs() {
+  while (activeJobCount < config.maxConcurrentJobs && pendingJobs.length > 0) {
+    const job = pendingJobs.shift();
+    if (!jobs.has(job.id)) {
+      continue;
+    }
+
+    activeJobCount += 1;
+    setImmediate(function startJob() {
+      runJobImpl(job).catch(function catchRunError(error) {
+        job.status = "failed";
+        job.stage = "failed";
+        job.progress = 0;
+        job.error = {
+          code: error.code || "JOB_ERROR",
+          message: error.message
+        };
+      }).finally(function releaseSlot() {
+        activeJobCount = Math.max(0, activeJobCount - 1);
+        startQueuedJobs();
+      });
+    });
+  }
+}
+
+function setJobRunnerForTest(runner) {
+  runJobImpl = runner || runJob;
+}
+
+function jobQueueState() {
+  return {
+    activeJobCount,
+    pendingJobCount: pendingJobs.length
+  };
+}
 
 function streamProxy(req, res, filePath, size) {
   const range = req.headers.range;
@@ -242,5 +378,9 @@ if (require.main === module) {
 
 module.exports = {
   app,
-  jobs
+  jobs,
+  pendingJobs,
+  startQueuedJobs,
+  setJobRunnerForTest,
+  jobQueueState
 };

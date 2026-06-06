@@ -1,7 +1,10 @@
 import {
   AddMarkersRequest,
   AddMarkersRequestBody,
+  ColumnInfo,
   CommandErrorType,
+  CreateSubClipRequest,
+  CreateSubClipRequestBody,
   ExportFileRequest,
   ExportFileRequestBody,
   GetBinFromMobRequest,
@@ -20,6 +23,10 @@ import {
   OpenBinRequest,
   OpenBinRequestBody,
   RequestMarkerInfo,
+  SelectMobsInBinRequest,
+  SelectMobsInBinRequestBody,
+  SetMobInfoRequest,
+  SetMobInfoRequestBody,
   TrackLabel,
   TrackType
 } from "../grpc-web/MCAPI_Types_pb.js";
@@ -33,18 +40,73 @@ import {
   markerLengthFrames,
   secondsToFrames
 } from "./marker-utils.js";
-import { markerInTimecode } from "./timecode-utils.mjs";
+import {
+  markerInTimecode,
+  secondsToTimecode
+} from "./timecode-utils.mjs";
+import {
+  availableAvidMetadataColumns,
+  buildPromptContextFromAsset,
+  buildClipProxyMetadata,
+  DEFAULT_AVID_METADATA_COLUMNS,
+  normalizeMobColumns,
+  normalizeMetadataColumnSelection,
+  normalizeProxyMatchMethods,
+  normalizeProxyRoots,
+  PROXY_MATCH_METHODS
+} from "./proxy-utils.mjs";
+import {
+  buildSubclipBatchName,
+  granularityPreset,
+  mergeSubclipAt,
+  normalizeGranularity,
+  normalizeSubclipNamingOptions,
+  normalizeSubclipOptionValues,
+  sanitizeSubclipName,
+  subclipRenameVerificationWarning,
+  selectedSubclipsForApply,
+  selectedCountLabel
+} from "./subclip-utils.mjs";
+import {
+  activeQueueItemCount,
+  createQueueItem,
+  isActiveQueueStatus,
+  queueStatusKind,
+  queueStatusLabel
+} from "./queue-utils.mjs";
 
 const MCAPI_ASSETLIST_MIME_TYPE = "text/x.avid.mc-api-asset-list+json";
 const DEFAULT_HELPER_URL = "http://localhost:4500";
 const DEFAULT_EXPORT_SETTING_NAME = "Mark 12Labs Proxy";
-const DEFAULT_MARKER_NAME_STYLE = "Short editor-facing marker names. No confidence, no reasoning, no full sentences.";
-const DEFAULT_MARKER_COMMENT_STYLE = "Concise Avid marker notes. No confidence, no reasoning, no full sentences.";
+const DEFAULT_MARKER_NAME_STYLE = "Short marker names. No confidence or reasoning.";
+const DEFAULT_MARKER_COMMENT_STYLE = "Short marker notes. No confidence or reasoning.";
+const DEFAULT_SUBCLIP_SUMMARY_STYLE = "Short summaries of why the section is useful. No confidence or reasoning.";
 const EXPORT_SETTING_STORAGE_KEY = "mark.exportSettingName";
 const LEGACY_MARKER_STYLE_STORAGE_KEY = "mark.markerStyle";
 const MARKER_NAME_STYLE_STORAGE_KEY = "mark.markerNameStyle";
 const MARKER_COMMENT_STYLE_STORAGE_KEY = "mark.markerCommentStyle";
+const SUBCLIP_SUMMARY_STYLE_STORAGE_KEY = "mark.subclipSummaryStyle";
 const FAVORITE_PROMPTS_STORAGE_KEY = "mark.favoritePrompts";
+const SUBCLIP_GRANULARITY_STORAGE_KEY = "mark.subclipGranularity";
+const SUBCLIP_MIN_DURATION_STORAGE_KEY = "mark.subclipMinDuration";
+const SUBCLIP_MAX_DURATION_STORAGE_KEY = "mark.subclipMaxDuration";
+const SUBCLIP_NAME_DELIMITER_STORAGE_KEY = "mark.subclipNameDelimiter";
+const SUBCLIP_NAME_SUFFIX_STORAGE_KEY = "mark.subclipNameSuffix";
+const SUBCLIP_NAME_START_STORAGE_KEY = "mark.subclipNameStart";
+const SUBCLIP_NAME_PADDING_STORAGE_KEY = "mark.subclipNamePadding";
+const REVIEW_THUMBNAIL_SIZE_STORAGE_KEY = "mark.reviewThumbnailSize";
+const AVID_METADATA_COLUMNS_STORAGE_KEY = "mark.avidMetadataContextColumns";
+const PROXY_REPOSITORY_ENABLED_STORAGE_KEY = "mark.proxyRepositoryEnabled";
+const PROXY_REPOSITORY_ROOTS_STORAGE_KEY = "mark.proxyRepositoryRoots";
+const PROXY_REPOSITORY_METHODS_STORAGE_KEY = "mark.proxyRepositoryMethods";
+const DEBUG_PANEL_ENABLED_STORAGE_KEY = "mark.debugPanelEnabled";
+const DEFAULT_REVIEW_THUMBNAIL_SIZE = "comfortable";
+const REVIEW_THUMBNAIL_SIZES = {
+  compact: 76,
+  comfortable: 108,
+  large: 136
+};
+const MAX_DEBUG_EVENTS = 200;
 const MAX_FAVORITE_PROMPTS = 20;
 const POLL_INTERVAL_MS = 2000;
 const MARK_MARKER_USER = "Mark";
@@ -111,30 +173,50 @@ const state = {
   activeClipIndex: -1,
   currentJobClipIndex: -1,
   activeReviewClipIndex: -1,
+  queueItems: [],
+  activeQueueItemId: null,
+  activeExportQueueItemId: null,
+  batchPhase: "idle",
   batchConfig: null,
   batchPrompt: "",
+  batchOptions: null,
+  hasShownIncrementalReview: false,
+  reviewCompletionSequence: 0,
+  debugPanelEnabled: false,
+  debugEvents: [],
+  subclipNamingOptions: normalizeSubclipNamingOptions({}),
   lastPrompt: "",
+  workflowMode: "markers",
   viewMode: "drop",
   previousViewMode: "drop",
-  isBusy: false
+  isBusy: false,
+  isApplying: false
 };
 
 const dom = {};
 
 function initDom() {
   [
-    "view-subtitle",
+    "view-title",
     "drop-view",
     "prompt-view",
     "busy-view",
+    "queue-view",
     "review-view",
     "settings-view",
+    "queue-toggle",
+    "queue-badge",
+    "queue-summary",
+    "queue-empty",
+    "queue-list",
+    "toast",
     "drop-area",
     "drop-empty",
-    "select-bin-button",
     "clip-tray",
     "selected-clip-list",
     "clear-clips-button",
+    "workflow-mode-markers",
+    "workflow-mode-subclips",
     "asset-name",
     "asset-details",
     "project-rate",
@@ -145,6 +227,15 @@ function initDom() {
     "favorite-prompt-select",
     "save-favorite-prompt-button",
     "delete-favorite-prompt-button",
+    "subclip-options",
+    "subclip-options-toggle",
+    "subclip-options-popover",
+    "subclip-duration-toggle",
+    "custom-duration-toggle",
+    "subclip-duration-fields",
+    "subclip-granularity",
+    "subclip-min-duration",
+    "subclip-max-duration",
     "analyze-button",
     "apply-button",
     "status-message",
@@ -156,6 +247,7 @@ function initDom() {
     "preview-count",
     "preview-empty",
     "suggestion-list",
+    "discard-suggestions-button",
     "helper-url",
     "check-helper-button",
     "connection-status",
@@ -167,6 +259,30 @@ function initDom() {
     "export-setting-summary",
     "marker-name-style",
     "marker-comment-style",
+    "avid-metadata-columns",
+    "avid-metadata-summary",
+    "subclip-summary-style",
+    "settings-subclip-granularity",
+    "settings-subclip-min-duration",
+    "settings-subclip-max-duration",
+    "subclip-name-delimiter",
+    "subclip-name-suffix",
+    "subclip-name-start",
+    "subclip-name-padding",
+    "subclip-name-preview",
+    "review-thumbnail-size",
+    "proxy-repository-enabled",
+    "proxy-repository-fields",
+    "proxy-repository-roots-field",
+    "proxy-repository-roots",
+    "proxy-match-source-file",
+    "proxy-match-source-path",
+    "proxy-match-clip-name",
+    "proxy-repository-summary",
+    "debug-panel-enabled",
+    "debug-panel-fields",
+    "debug-panel-output",
+    "debug-panel-clear",
     "settings-toggle",
     "export-setting-dialog",
     "export-setting-dialog-settings-button",
@@ -180,6 +296,95 @@ function initDom() {
 function setStatus(message, isError) {
   dom["status-message"].textContent = message;
   dom["status-message"].classList.toggle("error", Boolean(isError));
+}
+
+function showToast(message, kind) {
+  if (!dom["toast"]) {
+    return;
+  }
+  const item = document.createElement("div");
+  item.className = "toast-message";
+  item.dataset.kind = kind || "default";
+  item.textContent = message;
+  dom["toast"].appendChild(item);
+  dom["toast"].classList.remove("hidden");
+
+  window.setTimeout(function hideToast() {
+    item.remove();
+    if (dom["toast"].children.length === 0) {
+      dom["toast"].classList.add("hidden");
+    }
+  }, 2600);
+}
+
+function debugJson(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function appendDebugEvent(label, details) {
+  const event = {
+    at: new Date().toISOString(),
+    label,
+    details
+  };
+  state.debugEvents.push(event);
+  if (state.debugEvents.length > MAX_DEBUG_EVENTS) {
+    state.debugEvents.splice(0, state.debugEvents.length - MAX_DEBUG_EVENTS);
+  }
+  renderDebugPanel();
+}
+
+function renderDebugPanel() {
+  if (!dom["debug-panel-fields"] || !dom["debug-panel-output"]) {
+    return;
+  }
+  dom["debug-panel-fields"].classList.toggle("hidden", !state.debugPanelEnabled);
+  dom["debug-panel-enabled"].checked = state.debugPanelEnabled;
+  dom["debug-panel-output"].textContent = state.debugEvents.length > 0
+    ? state.debugEvents.map(function formatEvent(event) {
+      return `[${event.at}] ${event.label}\n${debugJson(event.details)}`;
+    }).join("\n\n")
+    : "No debug events yet.";
+}
+
+function setDebugPanelEnabled(isEnabled) {
+  state.debugPanelEnabled = Boolean(isEnabled);
+  try {
+    window.localStorage.setItem(DEBUG_PANEL_ENABLED_STORAGE_KEY, state.debugPanelEnabled ? "1" : "0");
+  } catch (error) {
+    // localStorage can be unavailable in some embedded browser states.
+  }
+  renderDebugPanel();
+}
+
+function loadDebugPanelSetting() {
+  state.debugPanelEnabled = localStorageItem(DEBUG_PANEL_ENABLED_STORAGE_KEY) === "1";
+  renderDebugPanel();
+}
+
+function appendAssetDebug(asset, label, details) {
+  if (!asset) {
+    return;
+  }
+
+  const lines = asset.debugMessage ? [asset.debugMessage] : [];
+  lines.push(`\n[${new Date().toLocaleTimeString()}] ${label}`);
+  if (details !== undefined) {
+    lines.push(typeof details === "string" ? details : debugJson(details));
+  }
+  asset.debugMessage = lines.join("\n");
+
+  if (/CreateSubClip|SetMobInfo|SelectMobsInBin|subclip|Destination bin/i.test(label)) {
+    appendDebugEvent(`Avid subclip: ${label}`, {
+      clip: asset.name || asset.displayName || "clip",
+      mobId: asset.id || "",
+      details
+    });
+  }
 }
 
 function avidErrorSummary(prefix, error) {
@@ -199,30 +404,49 @@ function setProgress(value) {
   dom["progress-bar"].style.width = `${width}%`;
 }
 
-function subtitleForView(viewMode) {
-  if (viewMode === "prompt") {
-    return "Tell me what to find in these clips.";
+function setProgressIndeterminate(isIndeterminate) {
+  dom["progress-bar"].classList.toggle("is-indeterminate", Boolean(isIndeterminate));
+}
+
+function activeAnalysisLabel() {
+  return isSubclipMode() ? "Finding sections" : "Analyzing";
+}
+
+function conciseJobMessage(job, fallback) {
+  if (job && job.stage === "preparing") {
+    return "Preparing media";
   }
-  if (viewMode === "busy") {
-    return "Analyzing clips and building marker suggestions.";
+  if (job && job.stage === "uploading") {
+    return "Analyzing";
   }
-  if (viewMode === "review") {
-    return "Review and edit markers before applying.";
+  if (job && job.stage === "thumbnailing") {
+    return "Creating thumbnails";
   }
+  return job && job.message ? job.message : fallback;
+}
+
+function titleForView(viewMode) {
   if (viewMode === "settings") {
-    return "Configure helper, export, and marker output.";
+    return "Settings";
   }
-  return "Drop clips in from an Avid bin.";
+  if (viewMode === "queue") {
+    return "Render Queue";
+  }
+  return "Hi, I'm Mark.";
+}
+
+function updateTopbarForView(viewMode) {
+  dom["view-title"].textContent = titleForView(viewMode);
 }
 
 function setViewMode(viewMode) {
-  if (viewMode !== "settings") {
+  if (viewMode !== "settings" && viewMode !== "queue") {
     state.previousViewMode = viewMode;
   }
 
   state.viewMode = viewMode;
   dom["app-shell"].dataset.view = viewMode;
-  ["drop", "prompt", "busy", "review", "settings"].forEach(function updateView(name) {
+  ["drop", "prompt", "busy", "queue", "review", "settings"].forEach(function updateView(name) {
     const section = dom[`${name}-view`];
     if (section) {
       section.classList.toggle("hidden", name !== viewMode);
@@ -230,16 +454,20 @@ function setViewMode(viewMode) {
   });
 
   const isSettings = viewMode === "settings";
+  const isQueue = viewMode === "queue";
   dom["settings-toggle"].setAttribute("aria-expanded", String(isSettings));
   dom["settings-toggle"].textContent = isSettings ? "×" : "⚙";
   dom["settings-toggle"].setAttribute("aria-label", isSettings ? "Close settings" : "Settings");
   dom["settings-toggle"].setAttribute("title", isSettings ? "Close settings" : "Settings");
-  dom["view-subtitle"].textContent = subtitleForView(viewMode);
+  dom["queue-toggle"].setAttribute("aria-expanded", String(isQueue));
+  dom["queue-toggle"].classList.toggle("is-active", isQueue);
+  updateTopbarForView(viewMode);
   setFavoritePromptPopoverOpen(false);
 }
 
 function openSettings() {
   state.previousViewMode = state.viewMode === "settings" ? state.previousViewMode : state.viewMode;
+  renderAvidMetadataColumnOptions();
   setViewMode("settings");
 }
 
@@ -248,10 +476,10 @@ function closeSettings() {
 }
 
 function inferMainViewMode() {
-  if (state.isBusy) {
+  if (state.isBusy && !hasReviewableResults()) {
     return "busy";
   }
-  if (totalMarkerCount() > 0 || state.selectedAssets.some(function hasFinished(asset) {
+  if (totalSuggestionCount() > 0 || state.selectedAssets.some(function hasFinished(asset) {
     return asset.status === "ready" || asset.status === "failed";
   })) {
     return "review";
@@ -262,28 +490,65 @@ function inferMainViewMode() {
   return "drop";
 }
 
+function isBatchActive() {
+  return ["preparing", "exporting", "postingJobs", "analyzing"].indexOf(state.batchPhase) !== -1;
+}
+
+function hasReviewableResults() {
+  return state.selectedAssets.some(function hasResult(asset) {
+    return asset.status === "ready" || asset.status === "failed" || currentSuggestions(asset).length > 0;
+  });
+}
+
+function isSubclipMode() {
+  return state.workflowMode === "subclips";
+}
+
+function currentSuggestions(asset) {
+  if (!asset) {
+    return [];
+  }
+  return isSubclipMode() ? asset.subclips || [] : asset.markers || [];
+}
+
+function currentSuggestionName(count) {
+  if (isSubclipMode()) {
+    return count === 1 ? "subclip" : "subclips";
+  }
+  return count === 1 ? "marker" : "markers";
+}
+
+function effectiveSubclipsForAsset(asset) {
+  return selectedSubclipsForApply(asset && asset.subclips || []);
+}
+
 function selectedUnappliedMarkerCount() {
   return state.selectedAssets.reduce(function countMarkers(total, asset) {
     if (asset.applied) {
       return total;
     }
-    return total + (asset.markers || []).filter(function selectedOnly(marker) {
-      return marker.use !== false;
+    if (isSubclipMode()) {
+      return total + effectiveSubclipsForAsset(asset).length;
+    }
+    return total + currentSuggestions(asset).filter(function selectedOnly(item) {
+      return item.use !== false;
     }).length;
   }, 0);
 }
 
-function totalMarkerCount() {
+function totalSuggestionCount() {
   return state.selectedAssets.reduce(function countMarkers(total, asset) {
-    return total + (asset.markers || []).length;
+    return total + currentSuggestions(asset).length;
   }, 0);
+}
+
+function totalMarkerCount() {
+  return totalSuggestionCount();
 }
 
 function updateApplyButtonLabel() {
   const count = selectedUnappliedMarkerCount();
-  dom["apply-button"].textContent = count > 0
-    ? `Apply ${count} Selected Marker${count === 1 ? "" : "s"}`
-    : "Apply Selected Markers";
+  dom["apply-button"].textContent = selectedCountLabel(state.workflowMode, count);
 }
 
 function setBusy(isBusy) {
@@ -292,16 +557,328 @@ function setBusy(isBusy) {
   const canAnalyze = state.selectedAssets.length > 0 && hasPrompt;
 
   dom["analyze-button"].disabled = state.isBusy || !canAnalyze;
-  dom["apply-button"].disabled = state.isBusy || selectedUnappliedMarkerCount() === 0;
-  dom["select-bin-button"].disabled = state.isBusy;
+  dom["apply-button"].disabled = state.isApplying || selectedUnappliedMarkerCount() === 0;
   dom["clear-clips-button"].disabled = state.isBusy;
+  dom["discard-suggestions-button"].disabled = state.isBusy;
+  dom["workflow-mode-markers"].disabled = state.isBusy;
+  dom["workflow-mode-subclips"].disabled = state.isBusy;
+  Array.from(dom["selected-clip-list"].querySelectorAll(".selected-clip-remove")).forEach(function updateRemoveButton(button) {
+    button.disabled = state.isBusy;
+  });
   dom["save-favorite-prompt-button"].disabled = !hasPrompt;
   dom["delete-favorite-prompt-button"].disabled = !dom["favorite-prompt-select"].value;
   updateApplyButtonLabel();
 }
 
+function findQueueItem(itemId) {
+  return state.queueItems.find(function sameItem(item) {
+    return item && item.id === itemId;
+  }) || null;
+}
+
+function activeQueueItem() {
+  return state.activeQueueItemId ? findQueueItem(state.activeQueueItemId) : null;
+}
+
+function isQueueAsset(asset) {
+  return state.queueItems.some(function hasAsset(item) {
+    return item && item.asset === asset;
+  });
+}
+
+function queueItemName(item) {
+  const asset = item && item.asset || {};
+  return asset.displayName || asset.name || asset.mobName || "Clip";
+}
+
+function queueItemSuggestionCount(item) {
+  const asset = item && item.asset || {};
+  return item && item.workflowMode === "subclips"
+    ? (asset.subclips || []).length
+    : (asset.markers || []).length;
+}
+
+function queueItemSuggestionName(item, count) {
+  if (item && item.workflowMode === "subclips") {
+    return count === 1 ? "subclip" : "subclips";
+  }
+  return count === 1 ? "marker" : "markers";
+}
+
+function queueItemStatusText(item) {
+  if (!item) {
+    return "Idle";
+  }
+  if (item.status === "ready") {
+    const count = queueItemSuggestionCount(item);
+    return count > 0 ? `${count} ${queueItemSuggestionName(item, count)}` : `No ${queueItemSuggestionName(item, 2)}`;
+  }
+  if (item.status === "failed") {
+    return "Failed";
+  }
+  return item.message || queueStatusLabel(item.status);
+}
+
+function updateQueueControls() {
+  if (!dom["queue-badge"]) {
+    return;
+  }
+  const activeCount = activeQueueItemCount(state.queueItems);
+  const readyCount = state.queueItems.filter(function ready(item) {
+    return item.status === "ready";
+  }).length;
+  const failedCount = state.queueItems.filter(function failed(item) {
+    return item.status === "failed";
+  }).length;
+  const title = activeCount > 0
+    ? `Render queue, ${activeCount} running`
+    : readyCount > 0
+      ? `Render queue, ${readyCount} ready`
+      : failedCount > 0
+        ? `Render queue, ${failedCount} failed`
+        : "Render queue";
+
+  dom["queue-badge"].textContent = activeCount > 99 ? "99+" : String(activeCount);
+  dom["queue-badge"].classList.toggle("hidden", activeCount === 0);
+  dom["queue-toggle"].setAttribute("aria-label", title);
+  dom["queue-toggle"].setAttribute("title", title);
+}
+
+function queueSummaryText() {
+  if (state.queueItems.length === 0) {
+    return "No active renders.";
+  }
+  const activeCount = activeQueueItemCount(state.queueItems);
+  const readyCount = state.queueItems.filter(function ready(item) {
+    return item.status === "ready";
+  }).length;
+  const failedCount = state.queueItems.filter(function failed(item) {
+    return item.status === "failed";
+  }).length;
+  const parts = [];
+  if (activeCount > 0) {
+    parts.push(`${activeCount} running`);
+  }
+  if (readyCount > 0) {
+    parts.push(`${readyCount} ready`);
+  }
+  if (failedCount > 0) {
+    parts.push(`${failedCount} failed`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : `${state.queueItems.length} queued`;
+}
+
+function renderQueue() {
+  updateQueueControls();
+  if (!dom["queue-list"]) {
+    return;
+  }
+
+  dom["queue-summary"].textContent = queueSummaryText();
+  dom["queue-empty"].classList.toggle("hidden", state.queueItems.length > 0);
+  dom["queue-list"].innerHTML = "";
+
+  state.queueItems.forEach(function renderItem(item) {
+    const statusKind = queueStatusKind(item.status);
+    const row = document.createElement("article");
+    row.className = "queue-row";
+    row.dataset.status = statusKind;
+    row.dataset.queueItemId = item.id;
+
+    const status = document.createElement("span");
+    status.className = "queue-status-dot";
+    status.dataset.status = statusKind;
+    status.setAttribute("aria-hidden", "true");
+
+    const body = document.createElement("div");
+    body.className = "queue-row-body";
+    const title = document.createElement("h3");
+    title.textContent = queueItemName(item);
+    const meta = document.createElement("p");
+    meta.className = "queue-row-meta";
+    meta.textContent = `${item.workflowMode === "subclips" ? "Subclips" : "Markers"} · ${item.prompt || "No prompt"}`;
+    const message = document.createElement("p");
+    message.className = "queue-row-message";
+    message.textContent = item.error || queueItemStatusText(item);
+    body.appendChild(title);
+    body.appendChild(meta);
+    if (!isActiveQueueStatus(item.status)) {
+      body.appendChild(message);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "queue-row-actions";
+    if (isActiveQueueStatus(item.status)) {
+      const stage = document.createElement("span");
+      stage.className = "queue-stage-label";
+      stage.textContent = queueItemStatusText(item);
+      const spinner = document.createElement("span");
+      spinner.className = "queue-spinner";
+      spinner.setAttribute("aria-label", "In progress");
+      actions.appendChild(stage);
+      actions.appendChild(spinner);
+    } else if (item.status === "ready") {
+      const review = document.createElement("button");
+      review.className = "queue-action-button primary-button";
+      review.type = "button";
+      review.textContent = state.activeQueueItemId === item.id ? "Reviewing" : "Review";
+      review.disabled = state.activeQueueItemId === item.id && state.viewMode === "review";
+      review.addEventListener("click", function reviewItem() {
+        openQueueItemReview(item.id);
+      });
+      actions.appendChild(review);
+    } else if (item.status === "failed") {
+      const dismiss = document.createElement("button");
+      dismiss.className = "queue-action-button secondary-button";
+      dismiss.type = "button";
+      dismiss.textContent = "Dismiss";
+      dismiss.addEventListener("click", function dismissItem() {
+        dismissQueueItem(item.id);
+      });
+      actions.appendChild(dismiss);
+    }
+
+    row.appendChild(status);
+    row.appendChild(body);
+    row.appendChild(actions);
+    dom["queue-list"].appendChild(row);
+  });
+}
+
+function updateQueueItem(item, patch) {
+  if (!item) {
+    return;
+  }
+  Object.assign(item, patch, {
+    updatedAt: new Date().toISOString()
+  });
+  if (item.asset) {
+    ["status", "message", "exportTaskId", "helperJobId", "exportPath", "proxySource", "proxyCandidates", "proxyLookupMessage", "error"].forEach(function mirror(key) {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) {
+        item.asset[key] = patch[key];
+      }
+    });
+    if (Object.prototype.hasOwnProperty.call(patch, "progress")) {
+      item.asset.jobProgress = patch.progress;
+    }
+  }
+  renderQueue();
+}
+
+function openQueue() {
+  if (state.viewMode !== "queue" && state.viewMode !== "settings") {
+    state.previousViewMode = state.viewMode;
+  }
+  renderQueue();
+  setViewMode("queue");
+}
+
+function closeQueue() {
+  setViewMode(state.previousViewMode && state.previousViewMode !== "queue"
+    ? state.previousViewMode
+    : inferMainViewMode());
+}
+
+function toggleQueue() {
+  if (state.viewMode === "queue") {
+    closeQueue();
+  } else {
+    openQueue();
+  }
+}
+
+function openQueueItemReview(itemId) {
+  const item = findQueueItem(itemId);
+  if (!item || item.status !== "ready") {
+    return;
+  }
+
+  state.activeQueueItemId = item.id;
+  state.selectedAssets = [item.asset];
+  state.project = item.project || state.project;
+  state.workflowMode = item.workflowMode;
+  state.lastPrompt = item.prompt;
+  state.activeReviewClipIndex = 0;
+  state.reviewCompletionSequence = 1;
+  item.asset.reviewCompletionOrder = item.asset.reviewCompletionOrder || 1;
+  updateWorkflowControls();
+  renderAsset();
+  renderPreview();
+  renderQueue();
+  setBusy(false);
+  setStatus(`Review ${queueItemName(item)}.`);
+  setViewMode("review");
+}
+
+function cleanupQueueItemResources(item) {
+  if (!item || !item.helperJobId) {
+    return;
+  }
+  requestJson("DELETE", `/jobs/${encodeURIComponent(item.helperJobId)}`).catch(function noop() {});
+}
+
+function clearActiveQueueReview(itemId) {
+  if (state.activeQueueItemId !== itemId) {
+    return;
+  }
+  state.activeQueueItemId = null;
+  state.selectedAssets = [];
+  state.activeReviewClipIndex = -1;
+  renderAsset();
+  renderPreview();
+}
+
+function removeQueueItem(itemId) {
+  const index = state.queueItems.findIndex(function sameItem(item) {
+    return item && item.id === itemId;
+  });
+  if (index === -1) {
+    return null;
+  }
+  const item = state.queueItems[index];
+  cleanupQueueItemResources(item);
+  state.queueItems.splice(index, 1);
+  clearActiveQueueReview(itemId);
+  renderQueue();
+  return item;
+}
+
+function dismissQueueItem(itemId) {
+  const item = findQueueItem(itemId);
+  if (!item || item.status !== "failed") {
+    return;
+  }
+  removeQueueItem(itemId);
+  setStatus(`${queueItemName(item)} dismissed.`);
+  if (state.viewMode === "queue" && state.queueItems.length === 0) {
+    renderQueue();
+  }
+}
+
+function completeActiveQueueItemAfterApply() {
+  const item = activeQueueItem();
+  if (!item) {
+    return false;
+  }
+  item.asset.applied = true;
+  removeQueueItem(item.id);
+  setViewMode(state.queueItems.length > 0 ? "queue" : "drop");
+  return true;
+}
+
 function helperBaseUrl() {
   return (dom["helper-url"].value || DEFAULT_HELPER_URL).replace(/\/+$/, "");
+}
+
+function helperAssetUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(text)) {
+    return text;
+  }
+  return `${helperBaseUrl()}${text.charAt(0) === "/" ? "" : "/"}${text}`;
 }
 
 function savedExportSettingName() {
@@ -324,11 +901,130 @@ function saveExportSettingName(settingName) {
   }
 }
 
+function saveProxyRepositorySettings() {
+  const methods = proxyRepositoryMethodsFromDom();
+  try {
+    window.localStorage.setItem(PROXY_REPOSITORY_ENABLED_STORAGE_KEY, dom["proxy-repository-enabled"].checked ? "1" : "0");
+    window.localStorage.setItem(PROXY_REPOSITORY_ROOTS_STORAGE_KEY, dom["proxy-repository-roots"].value || "");
+    window.localStorage.setItem(PROXY_REPOSITORY_METHODS_STORAGE_KEY, JSON.stringify(methods));
+  } catch (error) {
+    // localStorage can be unavailable in some embedded browser states.
+  }
+  updateProxyRepositorySummary();
+}
+
+function proxyRepositoryMethodsFromDom() {
+  const selected = [];
+  if (dom["proxy-match-source-file"] && dom["proxy-match-source-file"].checked) {
+    selected.push("sourceFile");
+  }
+  if (dom["proxy-match-source-path"] && dom["proxy-match-source-path"].checked) {
+    selected.push("sourcePath");
+  }
+  if (dom["proxy-match-clip-name"] && dom["proxy-match-clip-name"].checked) {
+    selected.push("clipName");
+  }
+  return normalizeProxyMatchMethods(selected);
+}
+
+function proxyRepositorySettings() {
+  const fallbackRoots = state.helperConfig && Array.isArray(state.helperConfig.proxyRoots) ? state.helperConfig.proxyRoots : [];
+  return {
+    enabled: Boolean(dom["proxy-repository-enabled"] && dom["proxy-repository-enabled"].checked),
+    roots: normalizeProxyRoots(dom["proxy-repository-roots"] && dom["proxy-repository-roots"].value, fallbackRoots),
+    methods: proxyRepositoryMethodsFromDom(),
+    extensions: state.helperConfig && Array.isArray(state.helperConfig.proxyExtensions) ? state.helperConfig.proxyExtensions : undefined
+  };
+}
+
+function loadProxyRepositorySettings() {
+  const enabled = localStorageItem(PROXY_REPOSITORY_ENABLED_STORAGE_KEY) === "1";
+  const roots = localStorageItem(PROXY_REPOSITORY_ROOTS_STORAGE_KEY) || "";
+  let methods = PROXY_MATCH_METHODS.slice();
+  try {
+    methods = normalizeProxyMatchMethods(JSON.parse(localStorageItem(PROXY_REPOSITORY_METHODS_STORAGE_KEY) || "[]"));
+  } catch (error) {
+    methods = PROXY_MATCH_METHODS.slice();
+  }
+
+  dom["proxy-repository-enabled"].checked = enabled;
+  dom["proxy-repository-roots"].value = roots;
+  dom["proxy-match-source-file"].checked = methods.indexOf("sourceFile") !== -1;
+  dom["proxy-match-source-path"].checked = methods.indexOf("sourcePath") !== -1;
+  dom["proxy-match-clip-name"].checked = methods.indexOf("clipName") !== -1;
+  updateProxyRepositorySummary();
+}
+
+function updateProxyRepositorySummary() {
+  if (!dom["proxy-repository-summary"]) {
+    return;
+  }
+  const settings = proxyRepositorySettings();
+  const usesSourcePath = settings.methods.indexOf("sourcePath") !== -1;
+  const usesFolderSearch = settings.methods.some(function needsRoots(method) {
+    return method === "sourceFile" || method === "clipName";
+  });
+  if (dom["proxy-repository-fields"]) {
+    dom["proxy-repository-fields"].classList.toggle("hidden", !settings.enabled);
+  }
+  if (dom["proxy-repository-roots-field"]) {
+    dom["proxy-repository-roots-field"].classList.toggle("hidden", !settings.enabled || !usesFolderSearch);
+  }
+  if (!settings.enabled) {
+    dom["proxy-repository-summary"].textContent = "Existing proxy lookup is off. Mark will export temporary proxies from Avid.";
+    return;
+  }
+  if (usesSourcePath && !usesFolderSearch) {
+    dom["proxy-repository-summary"].textContent = "Mark will use Avid's Source Path directly. No search folder is required.";
+    return;
+  }
+  if (usesSourcePath && usesFolderSearch && settings.roots.length === 0) {
+    dom["proxy-repository-summary"].textContent = "Mark will use Avid's Source Path directly. Add folders only if you also want folder search.";
+    return;
+  }
+  dom["proxy-repository-summary"].textContent = settings.roots.length > 0
+    ? `Mark will search Avid Source Path plus ${settings.roots.length} folder location${settings.roots.length === 1 ? "" : "s"}.`
+    : "Add at least one folder or drive path, or enable Avid Source Path.";
+}
+
+function proxyLookupFallbackMessage(asset, reason) {
+  const clipName = asset && (asset.name || asset.displayName) || "clip";
+  return `${reason} Exporting proxy for ${clipName} now.`;
+}
+
 function localStorageItem(key) {
   try {
     return window.localStorage.getItem(key);
   } catch (error) {
     return null;
+  }
+}
+
+function normalizeReviewThumbnailSize(value) {
+  return Object.prototype.hasOwnProperty.call(REVIEW_THUMBNAIL_SIZES, value)
+    ? value
+    : DEFAULT_REVIEW_THUMBNAIL_SIZE;
+}
+
+function applyReviewThumbnailSize(value) {
+  const size = normalizeReviewThumbnailSize(value);
+  document.documentElement.style.setProperty("--review-thumbnail-width", `${REVIEW_THUMBNAIL_SIZES[size]}px`);
+  if (dom["review-thumbnail-size"]) {
+    dom["review-thumbnail-size"].value = size;
+  }
+  return size;
+}
+
+function loadReviewThumbnailSize() {
+  return applyReviewThumbnailSize(localStorageItem(REVIEW_THUMBNAIL_SIZE_STORAGE_KEY));
+}
+
+function saveReviewThumbnailSize() {
+  const size = applyReviewThumbnailSize(dom["review-thumbnail-size"].value);
+  try {
+    window.localStorage.setItem(REVIEW_THUMBNAIL_SIZE_STORAGE_KEY, size);
+  } catch (error) {
+    // localStorage can be unavailable in some embedded browser states.
   }
 }
 
@@ -344,7 +1040,8 @@ function savedMarkerStyleText(key, fallback) {
 function markerOutputStyle() {
   return {
     nameStyle: (dom["marker-name-style"].value || DEFAULT_MARKER_NAME_STYLE).trim(),
-    commentStyle: (dom["marker-comment-style"].value || DEFAULT_MARKER_COMMENT_STYLE).trim()
+    commentStyle: (dom["marker-comment-style"].value || DEFAULT_MARKER_COMMENT_STYLE).trim(),
+    subclipSummaryStyle: (dom["subclip-summary-style"].value || DEFAULT_SUBCLIP_SUMMARY_STYLE).trim()
   };
 }
 
@@ -353,6 +1050,7 @@ function saveMarkerOutputStyle() {
   try {
     window.localStorage.setItem(MARKER_NAME_STYLE_STORAGE_KEY, style.nameStyle);
     window.localStorage.setItem(MARKER_COMMENT_STYLE_STORAGE_KEY, style.commentStyle);
+    window.localStorage.setItem(SUBCLIP_SUMMARY_STYLE_STORAGE_KEY, style.subclipSummaryStyle);
   } catch (error) {
     // localStorage can be unavailable in some embedded browser states.
   }
@@ -361,6 +1059,320 @@ function saveMarkerOutputStyle() {
 function loadMarkerOutputStyle() {
   dom["marker-name-style"].value = savedMarkerStyleText(MARKER_NAME_STYLE_STORAGE_KEY, DEFAULT_MARKER_NAME_STYLE);
   dom["marker-comment-style"].value = savedMarkerStyleText(MARKER_COMMENT_STYLE_STORAGE_KEY, DEFAULT_MARKER_COMMENT_STYLE);
+  dom["subclip-summary-style"].value = localStorageItem(SUBCLIP_SUMMARY_STYLE_STORAGE_KEY) || DEFAULT_SUBCLIP_SUMMARY_STYLE;
+}
+
+function savedAvidMetadataColumns() {
+  try {
+    return normalizeMetadataColumnSelection(JSON.parse(localStorageItem(AVID_METADATA_COLUMNS_STORAGE_KEY) || "[]"));
+  } catch (error) {
+    return [];
+  }
+}
+
+function selectedAvidMetadataColumns() {
+  const select = dom["avid-metadata-columns"];
+  if (!select) {
+    return [];
+  }
+  return normalizeMetadataColumnSelection(Array.from(select.selectedOptions).map(function selected(option) {
+    return option.value;
+  }));
+}
+
+function saveAvidMetadataColumns() {
+  const selected = selectedAvidMetadataColumns();
+  try {
+    window.localStorage.setItem(AVID_METADATA_COLUMNS_STORAGE_KEY, JSON.stringify(selected));
+  } catch (error) {
+    // localStorage can be unavailable in some embedded browser states.
+  }
+  updateAvidMetadataSummary();
+}
+
+function renderAvidMetadataColumnOptions() {
+  const select = dom["avid-metadata-columns"];
+  if (!select) {
+    return;
+  }
+  const selected = new Set(savedAvidMetadataColumns().map(function lower(column) {
+    return column.toLowerCase();
+  }));
+  const columns = availableAvidMetadataColumns(
+    state.selectedAssets,
+    DEFAULT_AVID_METADATA_COLUMNS.concat(savedAvidMetadataColumns())
+  );
+
+  select.innerHTML = "";
+  columns.forEach(function addColumn(column) {
+    const option = document.createElement("option");
+    option.value = column;
+    option.textContent = column;
+    option.selected = selected.has(column.toLowerCase());
+    select.appendChild(option);
+  });
+  updateAvidMetadataSummary();
+}
+
+function updateAvidMetadataSummary() {
+  if (!dom["avid-metadata-summary"]) {
+    return;
+  }
+  const selected = selectedAvidMetadataColumns();
+  if (selected.length === 0) {
+    dom["avid-metadata-summary"].textContent = "No Avid metadata will be added to prompts.";
+    return;
+  }
+  dom["avid-metadata-summary"].textContent = `Adds ${selected.length} selected column${selected.length === 1 ? "" : "s"} when the current clip has values.`;
+}
+
+function loadSubclipNamingOptions() {
+  const options = normalizeSubclipNamingOptions({
+    delimiter: localStorageItem(SUBCLIP_NAME_DELIMITER_STORAGE_KEY),
+    suffix: localStorageItem(SUBCLIP_NAME_SUFFIX_STORAGE_KEY),
+    startNumber: localStorageItem(SUBCLIP_NAME_START_STORAGE_KEY),
+    padding: localStorageItem(SUBCLIP_NAME_PADDING_STORAGE_KEY)
+  });
+  state.subclipNamingOptions = options;
+  dom["subclip-name-delimiter"].value = options.delimiter;
+  dom["subclip-name-suffix"].value = options.suffix;
+  dom["subclip-name-start"].value = String(options.startNumber);
+  dom["subclip-name-padding"].value = String(options.padding);
+  updateSubclipNamePreview();
+}
+
+function subclipNamingOptions() {
+  state.subclipNamingOptions = normalizeSubclipNamingOptions({
+    delimiter: dom["subclip-name-delimiter"].value,
+    suffix: dom["subclip-name-suffix"].value,
+    startNumber: dom["subclip-name-start"].value,
+    padding: dom["subclip-name-padding"].value
+  });
+  return state.subclipNamingOptions;
+}
+
+function saveSubclipNamingOptions(commitInputs = true) {
+  const options = subclipNamingOptions();
+  if (commitInputs) {
+    dom["subclip-name-delimiter"].value = options.delimiter;
+    dom["subclip-name-suffix"].value = options.suffix;
+    dom["subclip-name-start"].value = String(options.startNumber);
+    dom["subclip-name-padding"].value = String(options.padding);
+  }
+  try {
+    window.localStorage.setItem(SUBCLIP_NAME_DELIMITER_STORAGE_KEY, options.delimiter);
+    window.localStorage.setItem(SUBCLIP_NAME_SUFFIX_STORAGE_KEY, options.suffix);
+    window.localStorage.setItem(SUBCLIP_NAME_START_STORAGE_KEY, String(options.startNumber));
+    window.localStorage.setItem(SUBCLIP_NAME_PADDING_STORAGE_KEY, String(options.padding));
+  } catch (error) {
+    // localStorage can be unavailable in some embedded browser states.
+  }
+  updateSubclipNamePreview();
+}
+
+function updateSubclipNamePreview() {
+  if (!dom["subclip-name-preview"]) {
+    return;
+  }
+  dom["subclip-name-preview"].textContent = buildSubclipBatchName("Clip", 0, state.subclipNamingOptions, new Set());
+}
+
+function loadSubclipOptions() {
+  const savedGranularity = normalizeGranularity(localStorageItem(SUBCLIP_GRANULARITY_STORAGE_KEY));
+  const preset = granularityPreset(savedGranularity);
+  dom["subclip-granularity"].value = savedGranularity;
+  dom["subclip-min-duration"].value = localStorageItem(SUBCLIP_MIN_DURATION_STORAGE_KEY) || String(preset.minDuration);
+  dom["subclip-max-duration"].value = localStorageItem(SUBCLIP_MAX_DURATION_STORAGE_KEY) || String(preset.maxDuration);
+  updateSubclipDurationSummary();
+}
+
+function subclipOptions() {
+  const granularity = normalizeGranularity(dom["subclip-granularity"].value);
+  const preset = granularityPreset(granularity);
+  return normalizeSubclipOptionValues({
+    granularity,
+    minDuration: dom["subclip-min-duration"].value || preset.minDuration,
+    maxDuration: dom["subclip-max-duration"].value || preset.maxDuration,
+    targetSegmentsPerMinute: preset.targetSegmentsPerMinute
+  });
+}
+
+function saveSubclipOptions() {
+  const options = subclipOptions();
+  try {
+    window.localStorage.setItem(SUBCLIP_GRANULARITY_STORAGE_KEY, options.granularity);
+    window.localStorage.setItem(SUBCLIP_MIN_DURATION_STORAGE_KEY, String(options.minDuration));
+    window.localStorage.setItem(SUBCLIP_MAX_DURATION_STORAGE_KEY, String(options.maxDuration));
+  } catch (error) {
+    // localStorage can be unavailable in some embedded browser states.
+  }
+}
+
+function syncSettingsSubclipDefaults(options) {
+  const normalized = options || subclipOptions();
+  if (!dom["settings-subclip-granularity"]) {
+    return;
+  }
+  dom["settings-subclip-granularity"].value = normalized.granularity;
+  dom["settings-subclip-min-duration"].value = String(normalized.minDuration);
+  dom["settings-subclip-max-duration"].value = String(normalized.maxDuration);
+}
+
+function applySettingsSubclipDefaults(useGranularityPreset) {
+  dom["subclip-granularity"].value = dom["settings-subclip-granularity"].value || "balanced";
+  if (useGranularityPreset) {
+    applyGranularityDefaults();
+    return;
+  }
+  dom["subclip-min-duration"].value = dom["settings-subclip-min-duration"].value;
+  dom["subclip-max-duration"].value = dom["settings-subclip-max-duration"].value;
+  updateSubclipDurationSummary();
+  saveSubclipOptions();
+}
+
+function subclipGranularityLabel(granularity) {
+  if (normalizeGranularity(granularity) === "fine") {
+    return "Detailed";
+  }
+  return granularityPreset(granularity).label;
+}
+
+function hasCustomSubclipDuration(options) {
+  const normalized = options || subclipOptions();
+  const preset = granularityPreset(normalized.granularity);
+  return Number(normalized.minDuration) !== Number(preset.minDuration)
+    || Number(normalized.maxDuration) !== Number(preset.maxDuration);
+}
+
+function customDurationLabel(options) {
+  const normalized = options || subclipOptions();
+  return `${normalized.minDuration}-${normalized.maxDuration}s`;
+}
+
+function setSubclipOptionsPopoverOpen(isOpen, showDurationFields) {
+  if (!dom["subclip-options-popover"]) {
+    return;
+  }
+
+  dom["subclip-options-popover"].classList.toggle("hidden", !isOpen);
+  dom["subclip-options-toggle"].setAttribute("aria-expanded", String(isOpen));
+  dom["subclip-duration-toggle"].setAttribute("aria-expanded", String(isOpen));
+  if (isOpen && showDurationFields) {
+    setCustomDurationFieldsOpen(true);
+  }
+}
+
+function setCustomDurationFieldsOpen(isOpen) {
+  if (!dom["subclip-duration-fields"]) {
+    return;
+  }
+  dom["subclip-duration-fields"].classList.toggle("hidden", !isOpen);
+  dom["custom-duration-toggle"].setAttribute("aria-expanded", String(isOpen));
+}
+
+function applyGranularityDefaults() {
+  const preset = granularityPreset(dom["subclip-granularity"].value);
+  dom["subclip-min-duration"].value = String(preset.minDuration);
+  dom["subclip-max-duration"].value = String(preset.maxDuration);
+  updateSubclipDurationSummary();
+  saveSubclipOptions();
+}
+
+function updateSubclipDurationSummary() {
+  const options = subclipOptions();
+  const customDuration = hasCustomSubclipDuration(options);
+  const settingsLabel = `Subclip settings: ${subclipGranularityLabel(options.granularity)}${customDuration ? `, ${customDurationLabel(options)}` : ""}`;
+  dom["subclip-options-toggle"].setAttribute("aria-label", settingsLabel);
+  dom["subclip-options-toggle"].setAttribute("title", settingsLabel);
+  dom["subclip-duration-toggle"].textContent = customDurationLabel(options);
+  dom["subclip-duration-toggle"].classList.toggle("hidden", !customDuration);
+  dom["custom-duration-toggle"].querySelector("strong").textContent = customDuration
+    ? customDurationLabel(options)
+    : "Default";
+  Array.from(document.querySelectorAll(".granularity-choice")).forEach(function updateChoice(button) {
+    const isActive = normalizeGranularity(button.dataset.granularity) === options.granularity;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+  syncSettingsSubclipDefaults(options);
+}
+
+function updateWorkflowControls() {
+  const isSubclips = isSubclipMode();
+  dom["workflow-mode-markers"].classList.toggle("is-active", !isSubclips);
+  dom["workflow-mode-markers"].setAttribute("aria-pressed", String(!isSubclips));
+  dom["workflow-mode-subclips"].classList.toggle("is-active", isSubclips);
+  dom["workflow-mode-subclips"].setAttribute("aria-pressed", String(isSubclips));
+  dom["subclip-options"].classList.toggle("hidden", !isSubclips);
+  if (!isSubclips) {
+    setSubclipOptionsPopoverOpen(false);
+  }
+  dom["prompt-view"].setAttribute("aria-label", isSubclips ? "Subclip prompt" : "Marker prompt");
+  dom["preview-empty"].textContent = isSubclips
+    ? "I'll show suggested subclip sections here, grouped by clip."
+    : "I'll show suggested marker moments here, grouped by clip.";
+  dom["marker-prompt"].placeholder = isSubclips
+    ? "continuous moments with strong reactions"
+    : "exteriors of buildings";
+  dom["analyze-button"].setAttribute("aria-label", isSubclips ? "Find sections" : "Find moments");
+  dom["analyze-button"].setAttribute("title", isSubclips ? "Find sections" : "Find moments");
+  const promptLabel = document.querySelector(".prompt-label");
+  if (promptLabel) {
+    promptLabel.textContent = isSubclips ? "What should I pull?" : "What should I look for?";
+  }
+  if (state.viewMode !== "settings") {
+    updateTopbarForView(state.viewMode);
+  }
+  updateApplyButtonLabel();
+}
+
+function clearAnalysisResults() {
+  cleanupRetainedJobs();
+  clearPoll();
+  state.batchPhase = "idle";
+  state.selectedAssets.forEach(function resetAsset(asset) {
+    asset.status = "idle";
+    asset.message = "Ready";
+    asset.exportTaskId = null;
+    asset.helperJobId = null;
+    asset.exportPath = null;
+    asset.proxySource = null;
+    asset.proxyCandidates = null;
+    asset.proxyLookupMessage = "";
+    asset.pendingExport = null;
+    asset.markers = [];
+    asset.subclips = [];
+    asset.applied = false;
+    asset.error = null;
+    asset.debugMessage = "";
+  });
+  state.activeReviewClipIndex = -1;
+  state.activeClipIndex = -1;
+  state.currentJobClipIndex = -1;
+  state.batchConfig = null;
+  state.batchPrompt = "";
+  state.batchOptions = null;
+  state.hasShownIncrementalReview = false;
+  setProgressIndeterminate(false);
+  setProgress(0);
+  dom["progress-detail"].textContent = "";
+}
+
+function setWorkflowMode(mode) {
+  const nextMode = mode === "subclips" ? "subclips" : "markers";
+  if (nextMode === state.workflowMode) {
+    return;
+  }
+  if (state.isBusy) {
+    return;
+  }
+
+  state.workflowMode = nextMode;
+  clearAnalysisResults();
+  updateWorkflowControls();
+  renderPreview();
+  setBusy(false);
+  setStatus(nextMode === "subclips" ? "Ready to find continuous sections." : "Ready to find marker moments.");
 }
 
 function loadFavoritePrompts() {
@@ -397,7 +1409,7 @@ function renderFavoritePrompts() {
   select.innerHTML = "";
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = state.favoritePrompts.length > 0 ? "Favorite prompts" : "No favorites yet";
+  placeholder.textContent = state.favoritePrompts.length > 0 ? "Prompt presets" : "No presets yet";
   select.appendChild(placeholder);
 
   state.favoritePrompts.forEach(function addPrompt(prompt) {
@@ -414,7 +1426,7 @@ function renderFavoritePrompts() {
 function saveCurrentFavoritePrompt() {
   const prompt = dom["marker-prompt"].value.trim();
   if (!prompt) {
-    setStatus("Write a prompt before saving it as a favorite.", true);
+    setStatus("Write a prompt before saving it as a preset.", true);
     return;
   }
 
@@ -425,7 +1437,7 @@ function saveCurrentFavoritePrompt() {
 
   saveFavoritePrompts(nextPrompts);
   dom["favorite-prompt-select"].value = prompt;
-  setStatus("Favorite prompt saved.");
+  setStatus("Prompt preset saved.");
 }
 
 function deleteSelectedFavoritePrompt() {
@@ -437,7 +1449,7 @@ function deleteSelectedFavoritePrompt() {
   saveFavoritePrompts(state.favoritePrompts.filter(function keepFavorite(existing) {
     return existing !== prompt;
   }));
-  setStatus("Favorite prompt removed.");
+  setStatus("Prompt preset removed.");
 }
 
 function setFavoritePromptPopoverOpen(isOpen) {
@@ -534,6 +1546,15 @@ function candidateAssetName(asset) {
     return "";
   }
 
+  const columnCandidates = [
+    asset.columns && asset.columns.Name,
+    asset.columns && asset.columns.name,
+    asset.columnValues && asset.columnValues.Name,
+    asset.columnValues && asset.columnValues.name,
+    asset.binColumns && asset.binColumns.Name,
+    asset.binColumns && asset.binColumns.name
+  ];
+
   const directCandidates = [
     asset.name,
     asset.Name,
@@ -545,18 +1566,11 @@ function candidateAssetName(asset) {
     asset.title
   ];
 
-  const columnCandidates = [
-    asset.columns && asset.columns.Name,
-    asset.columns && asset.columns.name,
-    asset.columnValues && asset.columnValues.Name,
-    asset.columnValues && asset.columnValues.name,
-    asset.binColumns && asset.binColumns.Name,
-    asset.binColumns && asset.binColumns.name
-  ];
-
-  return directCandidates.concat(columnCandidates).map(function cleanName(value) {
+  return columnCandidates.concat(directCandidates).map(function cleanName(value) {
     return String(value || "").trim();
-  }).find(Boolean) || "";
+  }).find(function usableName(value) {
+    return value && value !== String(asset.id || "").trim();
+  }) || "";
 }
 
 function fallbackAssetName(asset) {
@@ -568,6 +1582,18 @@ function fallbackAssetName(asset) {
 
 function friendlyAssetName(asset) {
   return candidateAssetName(asset) || fallbackAssetName(asset);
+}
+
+function appendSvgIcon(element, paths) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  paths.forEach(function appendPath(pathData) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData);
+    svg.appendChild(path);
+  });
+  element.appendChild(svg);
 }
 
 function renderAsset() {
@@ -590,10 +1616,25 @@ function renderAsset() {
     : `${names.length} clips selected. Drop more clips here to add them.`;
 
   dom["selected-clip-list"].innerHTML = "";
-  state.selectedAssets.forEach(function renderSelectedClip(item) {
+  state.selectedAssets.forEach(function renderSelectedClip(item, assetIndex) {
     const pill = document.createElement("span");
     pill.className = "selected-clip-pill";
-    pill.textContent = item.displayName;
+    const label = document.createElement("span");
+    label.className = "selected-clip-name";
+    label.textContent = item.displayName;
+    const remove = document.createElement("button");
+    remove.className = "selected-clip-remove";
+    remove.type = "button";
+    remove.disabled = state.isBusy;
+    remove.setAttribute("aria-label", `Remove ${item.displayName}`);
+    remove.setAttribute("title", "Remove clip");
+    appendSvgIcon(remove, ["M18 6 6 18", "M6 6l12 12"]);
+    remove.addEventListener("click", function removeClip(event) {
+      event.stopPropagation();
+      removeSelectedClip(assetIndex);
+    });
+    pill.appendChild(label);
+    pill.appendChild(remove);
     dom["selected-clip-list"].appendChild(pill);
   });
 }
@@ -613,10 +1654,246 @@ function formatMarkerIn(marker) {
   return markerInTimecode(marker, state.project);
 }
 
+function formatSubclipPoint(seconds) {
+  const fps = state.project && state.project.fps ? state.project.fps : 24;
+  const dropFrame = Boolean(state.project && state.project.dropFrame);
+  return secondsToTimecode(seconds, fps, dropFrame);
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value < 60) {
+    return `${value.toFixed(value % 1 === 0 ? 0 : 1)} sec`;
+  }
+  const minutes = Math.floor(value / 60);
+  const remaining = Math.round(value % 60);
+  return `${minutes}:${String(remaining).padStart(2, "0")}`;
+}
+
+function subclipDuration(subclip) {
+  return Math.max(0, (Number(subclip.endTime) || 0) - (Number(subclip.startTime) || 0));
+}
+
+function renderMarkerSuggestionCard(asset, marker, markerIndex, activeIndex) {
+  const card = document.createElement("article");
+  card.className = "suggestion-card marker-card";
+  card.classList.toggle("is-muted", marker.use === false);
+  card.dataset.assetIndex = String(activeIndex);
+  card.dataset.markerId = marker.id || createGuid();
+  card.dataset.markerIndex = String(markerIndex);
+  card.dataset.kind = "marker";
+
+  const cardMeta = document.createElement("div");
+  cardMeta.className = "review-metadata-strip suggestion-card-meta";
+  cardMeta.classList.toggle("has-thumbnail", Boolean(marker.thumbnailUrl));
+
+  const selectLabel = document.createElement("label");
+  selectLabel.className = "suggestion-select";
+  const use = document.createElement("input");
+  use.className = "marker-use";
+  use.type = "checkbox";
+  use.checked = marker.use !== false;
+  use.setAttribute("aria-label", `Use marker ${markerIndex + 1} for ${asset.displayName || "clip"}`);
+  use.addEventListener("change", syncPreviewFromCards);
+  selectLabel.appendChild(use);
+
+  const timeRange = document.createElement("span");
+  timeRange.className = "time-range";
+  timeRange.dataset.role = "timecode";
+  timeRange.textContent = formatMarkerIn(marker);
+
+  const color = colorSelectField(marker.color);
+
+  const nameField = document.createElement("label");
+  nameField.className = "marker-field marker-field-name";
+  const nameLabel = document.createElement("span");
+  nameLabel.textContent = "Marker";
+  const name = document.createElement("textarea");
+  name.className = "marker-name-input";
+  name.rows = 2;
+  name.value = marker.name;
+  name.setAttribute("aria-label", "Marker name");
+  name.addEventListener("input", syncPreviewFromCards);
+  nameField.appendChild(nameLabel);
+  nameField.appendChild(name);
+
+  const commentField = document.createElement("label");
+  commentField.className = "marker-field marker-field-comment";
+  const commentLabel = document.createElement("span");
+  commentLabel.textContent = "Comment";
+  const comment = document.createElement("textarea");
+  comment.className = "marker-comment-input";
+  comment.rows = 3;
+  comment.value = marker.comment;
+  comment.setAttribute("aria-label", "Marker comment");
+  comment.addEventListener("input", syncPreviewFromCards);
+  commentField.appendChild(commentLabel);
+  commentField.appendChild(comment);
+
+  const startInput = document.createElement("input");
+  startInput.className = "marker-start-input";
+  startInput.type = "hidden";
+  startInput.value = marker.startTime.toFixed(3);
+
+  const endInput = document.createElement("input");
+  endInput.className = "marker-end-input";
+  endInput.type = "hidden";
+  endInput.value = marker.endTime.toFixed(3);
+
+  cardMeta.appendChild(selectLabel);
+  if (marker.thumbnailUrl) {
+    cardMeta.appendChild(resultThumbnail(marker.thumbnailUrl, `Marker ${markerIndex + 1} thumbnail`));
+  }
+  cardMeta.appendChild(timeRange);
+  cardMeta.appendChild(color);
+  card.appendChild(cardMeta);
+  card.appendChild(nameField);
+  card.appendChild(commentField);
+  card.appendChild(startInput);
+  card.appendChild(endInput);
+
+  if (!marker.id) {
+    state.selectedAssets[activeIndex].markers[markerIndex].id = card.dataset.markerId;
+  }
+
+  return card;
+}
+
+function renderSubclipSuggestionCard(asset, subclip, subclipIndex, activeIndex) {
+  const card = document.createElement("article");
+  card.className = "suggestion-card subclip-card";
+  card.classList.toggle("is-muted", subclip.use === false);
+  card.dataset.assetIndex = String(activeIndex);
+  card.dataset.subclipId = subclip.id || createGuid();
+  card.dataset.subclipIndex = String(subclipIndex);
+  card.dataset.kind = "subclip";
+
+  const cardHead = document.createElement("div");
+  cardHead.className = "review-metadata-strip subclip-card-head";
+  cardHead.classList.toggle("has-thumbnail", Boolean(subclip.thumbnailUrl));
+
+  const selectLabel = document.createElement("label");
+  selectLabel.className = "suggestion-select";
+  const use = document.createElement("input");
+  use.className = "subclip-use";
+  use.type = "checkbox";
+  use.checked = subclip.use !== false;
+  use.setAttribute("aria-label", `Use subclip ${subclipIndex + 1} for ${asset.displayName || "clip"}`);
+  use.addEventListener("change", function onSubclipUseChange() {
+    syncPreviewFromCards();
+    renderPreview();
+  });
+  selectLabel.appendChild(use);
+
+  const timing = document.createElement("div");
+  timing.className = "subclip-timing";
+  timing.dataset.role = "timecode";
+  timing.appendChild(subclipTimingItem("In", formatSubclipPoint(subclip.startTime)));
+  timing.appendChild(subclipTimingItem("Out", formatSubclipPoint(subclip.endTime)));
+  timing.appendChild(subclipTimingItem("Dur", formatDuration(subclipDuration(subclip))));
+
+  const mergeControls = document.createElement("div");
+  mergeControls.className = "subclip-merge-controls";
+  mergeControls.appendChild(subclipMergeButton("up", activeIndex, subclipIndex, subclipIndex === 0));
+  mergeControls.appendChild(subclipMergeButton("down", activeIndex, subclipIndex, subclipIndex >= (asset.subclips || []).length - 1));
+
+  const summaryField = document.createElement("label");
+  summaryField.className = "marker-field marker-field-comment subclip-summary-field";
+  const summaryLabel = document.createElement("span");
+  summaryLabel.className = "sr-only";
+  summaryLabel.textContent = "Summary";
+  const summary = document.createElement("textarea");
+  summary.className = "marker-comment-input subclip-summary-input";
+  summary.rows = 2;
+  summary.value = subclip.summary || "";
+  summary.setAttribute("aria-label", "Subclip summary");
+  summary.addEventListener("input", syncPreviewFromCards);
+  summaryField.appendChild(summaryLabel);
+  summaryField.appendChild(summary);
+
+  const startInput = subclipHiddenTimeInput("subclip-start-input", subclip.startTime);
+  const endInput = subclipHiddenTimeInput("subclip-end-input", subclip.endTime);
+
+  cardHead.appendChild(selectLabel);
+  if (subclip.thumbnailUrl) {
+    cardHead.appendChild(resultThumbnail(subclip.thumbnailUrl, `Subclip ${subclipIndex + 1} thumbnail`));
+  }
+  cardHead.appendChild(timing);
+  cardHead.appendChild(mergeControls);
+  card.appendChild(cardHead);
+  card.appendChild(summaryField);
+  card.appendChild(startInput);
+  card.appendChild(endInput);
+
+  if (!subclip.id) {
+    state.selectedAssets[activeIndex].subclips[Number(card.dataset.subclipIndex)].id = card.dataset.subclipId;
+  }
+
+  return card;
+}
+
+function subclipMergeButton(direction, activeIndex, subclipIndex, isDisabled) {
+  const button = document.createElement("button");
+  button.className = "subclip-merge-button";
+  button.type = "button";
+  button.disabled = isDisabled || state.isApplying;
+  button.textContent = direction === "up" ? "↑" : "↓";
+  button.setAttribute("aria-label", direction === "up" ? "Merge subclip up" : "Merge subclip down");
+  button.setAttribute("title", direction === "up" ? "Merge up" : "Merge down");
+  button.addEventListener("click", function onMergeClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    mergeSubclipInAsset(activeIndex, subclipIndex, direction);
+  });
+  return button;
+}
+
+function mergeSubclipInAsset(assetIndex, subclipIndex, direction) {
+  if (state.isApplying) {
+    return;
+  }
+  syncPreviewFromCards();
+  const asset = state.selectedAssets[assetIndex];
+  if (!asset) {
+    return;
+  }
+  asset.subclips = mergeSubclipAt(asset.subclips || [], subclipIndex, direction);
+  renderPreview();
+  setBusy(false);
+}
+
+function updateSubclipTiming(element, subclip) {
+  element.replaceChildren(
+    subclipTimingItem("In", formatSubclipPoint(subclip.startTime)),
+    subclipTimingItem("Out", formatSubclipPoint(subclip.endTime)),
+    subclipTimingItem("Dur", formatDuration(subclipDuration(subclip)))
+  );
+}
+
+function subclipTimingItem(labelText, value) {
+  const item = document.createElement("span");
+  item.className = "subclip-timing-item";
+  const label = document.createElement("span");
+  const text = document.createElement("strong");
+  label.textContent = labelText;
+  text.textContent = value;
+  item.appendChild(label);
+  item.appendChild(text);
+  return item;
+}
+
+function subclipHiddenTimeInput(className, value) {
+  const input = document.createElement("input");
+  input.className = className;
+  input.type = "hidden";
+  input.value = (Number(value) || 0).toFixed(3);
+  return input;
+}
+
 function renderPreview() {
   const list = dom["suggestion-list"];
   const prompt = state.lastPrompt || dom["marker-prompt"].value.trim();
-  const markerCount = totalMarkerCount();
+  const suggestionCount = totalSuggestionCount();
   const hasRunResults = state.selectedAssets.some(function hasResult(asset) {
     return asset.status === "ready" || asset.status === "failed";
   });
@@ -624,7 +1901,7 @@ function renderPreview() {
   list.innerHTML = "";
   tabs.innerHTML = "";
 
-  if (markerCount === 0 && !hasRunResults) {
+  if (suggestionCount === 0 && !hasRunResults) {
     dom["preview-count"].textContent = state.selectedAssets.length > 0
       ? `${state.selectedAssets.length} clip${state.selectedAssets.length === 1 ? "" : "s"} ready for analysis.`
       : "No suggestions yet.";
@@ -635,35 +1912,57 @@ function renderPreview() {
     return;
   }
 
-  dom["preview-count"].textContent = markerCount > 0
-    ? `I found ${markerCount} moment${markerCount === 1 ? "" : "s"} across ${state.selectedAssets.length} clip${state.selectedAssets.length === 1 ? "" : "s"}${prompt ? ` for "${prompt}"` : ""}.`
-    : `No marker suggestions${prompt ? ` for "${prompt}"` : ""}.`;
+  dom["preview-count"].textContent = suggestionCount > 0
+    ? `I found ${suggestionCount} ${currentSuggestionName(suggestionCount)} across ${state.selectedAssets.length} clip${state.selectedAssets.length === 1 ? "" : "s"}${prompt ? ` for "${prompt}"` : ""}.`
+    : `No ${currentSuggestionName(2)} suggestions${prompt ? ` for "${prompt}"` : ""}.`;
   dom["preview-empty"].classList.add("hidden");
   dom["review-content"].classList.remove("hidden");
   const activeIndex = normalizedActiveReviewClipIndex();
   state.activeReviewClipIndex = activeIndex;
 
-  state.selectedAssets.forEach(function renderTab(asset, assetIndex) {
+  sortedReviewClipEntries().forEach(function renderTab(entry) {
+    const asset = entry.asset;
+    const assetIndex = entry.assetIndex;
+    const statusKind = reviewClipStatusKind(asset);
+    const isSelectable = isReviewClipSelectable(asset);
+    const isActive = assetIndex === state.activeReviewClipIndex;
+    const labelText = asset.displayName || `Clip ${assetIndex + 1}`;
+    const statusText = clipStatusLabel(asset);
     const button = document.createElement("button");
     button.className = "review-clip-tab";
     button.type = "button";
+    button.disabled = !isSelectable;
     button.dataset.assetIndex = String(assetIndex);
-    button.classList.toggle("is-active", assetIndex === state.activeReviewClipIndex);
+    button.dataset.status = statusKind;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-current", isActive ? "true" : "false");
+    button.setAttribute("aria-label", `${labelText}: ${statusText}`);
+    button.setAttribute("title", `${labelText}: ${statusText}`);
     button.addEventListener("click", function activateClip() {
+      if (!isSelectable) {
+        return;
+      }
       state.activeReviewClipIndex = assetIndex;
       renderPreview();
     });
 
+    const status = document.createElement("span");
+    status.className = "review-clip-status-dot";
+    status.dataset.status = statusKind;
+    status.setAttribute("aria-hidden", "true");
     const label = document.createElement("span");
-    label.textContent = asset.displayName || `Clip ${assetIndex + 1}`;
+    label.className = "review-clip-name";
+    label.textContent = labelText;
     const meta = document.createElement("small");
-    meta.textContent = clipStatusLabel(asset);
+    meta.className = "review-clip-meta";
+    meta.textContent = statusText;
+    button.appendChild(status);
     button.appendChild(label);
     button.appendChild(meta);
     tabs.appendChild(button);
   });
   const asset = state.selectedAssets[activeIndex];
-  const markers = asset && asset.markers ? asset.markers : [];
+  const suggestions = currentSuggestions(asset);
 
   const clipGroup = document.createElement("section");
   clipGroup.className = "clip-result";
@@ -674,7 +1973,7 @@ function renderPreview() {
   const title = document.createElement("h3");
   title.textContent = asset ? asset.displayName : "Clip";
   const count = document.createElement("span");
-  count.textContent = `${markers.length} marker${markers.length === 1 ? "" : "s"}`;
+  count.textContent = `${suggestions.length} ${currentSuggestionName(suggestions.length)}`;
   header.appendChild(title);
   header.appendChild(count);
   clipGroup.appendChild(header);
@@ -682,88 +1981,20 @@ function renderPreview() {
   const markerList = document.createElement("div");
   markerList.className = "clip-marker-list";
 
-  if (markers.length === 0) {
+  if (suggestions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "clip-marker-empty";
-    empty.textContent = asset && asset.error ? asset.error : "No marker suggestions for this clip.";
+    empty.textContent = asset && asset.error
+      ? asset.error
+      : asset && asset.status && asset.status !== "ready"
+        ? asset.message || clipStatusLabel(asset)
+        : `No ${currentSuggestionName(2)} suggestions for this clip.`;
     markerList.appendChild(empty);
   } else {
-    markers.forEach(function renderCard(marker, markerIndex) {
-      const card = document.createElement("article");
-      card.className = "suggestion-card";
-      card.classList.toggle("is-muted", marker.use === false);
-      card.dataset.assetIndex = String(activeIndex);
-      card.dataset.markerId = marker.id || createGuid();
-
-      const cardMeta = document.createElement("div");
-      cardMeta.className = "suggestion-card-meta";
-
-      const selectLabel = document.createElement("label");
-      selectLabel.className = "suggestion-select";
-      const use = document.createElement("input");
-      use.className = "marker-use";
-      use.type = "checkbox";
-      use.checked = marker.use !== false;
-      use.setAttribute("aria-label", `Use marker ${markerIndex + 1} for ${asset.displayName || "clip"}`);
-      use.addEventListener("change", syncPreviewFromCards);
-      selectLabel.appendChild(use);
-
-      const timeRange = document.createElement("span");
-      timeRange.className = "time-range";
-      timeRange.dataset.role = "timecode";
-      timeRange.textContent = formatMarkerIn(marker);
-
-      const color = colorSelectField(marker.color);
-
-      const nameField = document.createElement("label");
-      nameField.className = "marker-field marker-field-name";
-      const nameLabel = document.createElement("span");
-      nameLabel.textContent = "Marker";
-      const name = document.createElement("textarea");
-      name.className = "marker-name-input";
-      name.rows = 2;
-      name.value = marker.name;
-      name.setAttribute("aria-label", "Marker name");
-      name.addEventListener("input", syncPreviewFromCards);
-      nameField.appendChild(nameLabel);
-      nameField.appendChild(name);
-
-      const commentField = document.createElement("label");
-      commentField.className = "marker-field marker-field-comment";
-      const commentLabel = document.createElement("span");
-      commentLabel.textContent = "Comment";
-      const comment = document.createElement("textarea");
-      comment.className = "marker-comment-input";
-      comment.rows = 3;
-      comment.value = marker.comment;
-      comment.setAttribute("aria-label", "Marker comment");
-      comment.addEventListener("input", syncPreviewFromCards);
-      commentField.appendChild(commentLabel);
-      commentField.appendChild(comment);
-
-      const startInput = document.createElement("input");
-      startInput.className = "marker-start-input";
-      startInput.type = "hidden";
-      startInput.value = marker.startTime.toFixed(3);
-
-      const endInput = document.createElement("input");
-      endInput.className = "marker-end-input";
-      endInput.type = "hidden";
-      endInput.value = marker.endTime.toFixed(3);
-
-      cardMeta.appendChild(selectLabel);
-      cardMeta.appendChild(timeRange);
-      cardMeta.appendChild(color);
-      card.appendChild(cardMeta);
-      card.appendChild(nameField);
-      card.appendChild(commentField);
-      card.appendChild(startInput);
-      card.appendChild(endInput);
-      markerList.appendChild(card);
-
-      if (!marker.id) {
-        state.selectedAssets[activeIndex].markers[markerIndex].id = card.dataset.markerId;
-      }
+    suggestions.forEach(function renderCard(suggestion, suggestionIndex) {
+      markerList.appendChild(isSubclipMode()
+        ? renderSubclipSuggestionCard(asset, suggestion, suggestionIndex, activeIndex)
+        : renderMarkerSuggestionCard(asset, suggestion, suggestionIndex, activeIndex));
     });
   }
 
@@ -775,26 +2006,119 @@ function renderPreview() {
 }
 
 function clipStatusLabel(asset) {
-  const markerCount = (asset.markers || []).length;
+  const suggestionCount = currentSuggestions(asset).length;
   if (asset.status === "failed") {
     return "Failed";
   }
-  if (markerCount > 0) {
-    return `${markerCount} marker${markerCount === 1 ? "" : "s"}`;
+  if (asset.status === "analyzing") {
+    return asset.message || "Analyzing";
   }
-  return asset.message || "No markers";
+  if (asset.status === "queued" || asset.status === "resolvingProxy" || asset.status === "exporting" || asset.status === "proxyReady") {
+    return asset.message || "Queued";
+  }
+  if (suggestionCount > 0) {
+    return `${suggestionCount} ${currentSuggestionName(suggestionCount)}`;
+  }
+  return asset.message || `No ${currentSuggestionName(2)}`;
+}
+
+function reviewClipStatusKind(asset) {
+  if (!asset) {
+    return "idle";
+  }
+  if (asset.status === "failed") {
+    return "failed";
+  }
+  if (asset.status === "ready" || currentSuggestions(asset).length > 0 || asset.applied) {
+    return "ready";
+  }
+  if (asset.status === "queued" || asset.status === "resolvingProxy" || asset.status === "exporting" || asset.status === "proxyReady" || asset.status === "analyzing") {
+    return "processing";
+  }
+  return "idle";
+}
+
+function isReviewClipSelectable(asset) {
+  const statusKind = reviewClipStatusKind(asset);
+  return statusKind === "ready" || statusKind === "failed";
+}
+
+function nextReviewCompletionOrder() {
+  state.reviewCompletionSequence += 1;
+  return state.reviewCompletionSequence;
+}
+
+function markReviewClipCompleted(asset) {
+  if (!asset || asset.reviewCompletionOrder) {
+    return;
+  }
+  asset.reviewCompletionOrder = nextReviewCompletionOrder();
+}
+
+function reviewClipSortRank(asset) {
+  const statusKind = reviewClipStatusKind(asset);
+  if (statusKind === "ready") {
+    return 0;
+  }
+  if (statusKind === "failed") {
+    return 2;
+  }
+  return 1;
+}
+
+function sortedReviewClipEntries() {
+  return state.selectedAssets.map(function withIndex(asset, assetIndex) {
+    return {
+      asset,
+      assetIndex,
+      rank: reviewClipSortRank(asset),
+      completionOrder: Number(asset.reviewCompletionOrder) || 0
+    };
+  }).sort(function byReviewStatus(left, right) {
+    if (left.rank !== right.rank) {
+      return left.rank - right.rank;
+    }
+    if (left.completionOrder !== right.completionOrder) {
+      return (left.completionOrder || Number.MAX_SAFE_INTEGER) - (right.completionOrder || Number.MAX_SAFE_INTEGER);
+    }
+    return left.assetIndex - right.assetIndex;
+  });
 }
 
 function normalizedActiveReviewClipIndex() {
-  if (state.activeReviewClipIndex >= 0 && state.activeReviewClipIndex < state.selectedAssets.length) {
+  const activeAsset = state.selectedAssets[state.activeReviewClipIndex];
+  if (activeAsset && isReviewClipSelectable(activeAsset)) {
     return state.activeReviewClipIndex;
   }
 
-  const firstWithMarkers = state.selectedAssets.findIndex(function hasMarkers(asset) {
-    return (asset.markers || []).length > 0;
+  const firstWithSuggestions = sortedReviewClipEntries().find(function hasSuggestions(entry) {
+    const asset = entry.asset;
+    return reviewClipStatusKind(asset) === "ready" && currentSuggestions(asset).length > 0;
   });
 
-  return firstWithMarkers === -1 ? 0 : firstWithMarkers;
+  if (firstWithSuggestions) {
+    return firstWithSuggestions.assetIndex;
+  }
+
+  const firstReady = sortedReviewClipEntries().find(function isReady(entry) {
+    return reviewClipStatusKind(entry.asset) === "ready";
+  });
+
+  if (firstReady) {
+    return firstReady.assetIndex;
+  }
+
+  const firstFailed = sortedReviewClipEntries().find(function isFailed(entry) {
+    return reviewClipStatusKind(entry.asset) === "failed";
+  });
+
+  if (firstFailed) {
+    return firstFailed.assetIndex;
+  }
+
+  return state.activeReviewClipIndex >= 0 && state.activeReviewClipIndex < state.selectedAssets.length
+    ? state.activeReviewClipIndex
+    : 0;
 }
 
 function markerColorHex(color) {
@@ -829,6 +2153,49 @@ function colorSelectField(value) {
   control.appendChild(chip);
   control.appendChild(select);
   return control;
+}
+
+function clampSubclip(subclip) {
+  const startTime = Math.max(0, Number(subclip.startTime) || 0);
+  const rawEnd = Number(subclip.endTime);
+  const endTime = Number.isFinite(rawEnd) && rawEnd > startTime ? rawEnd : startTime + 1;
+
+  return {
+    id: subclip.id || createGuid(),
+    use: subclip.use !== false,
+    name: sanitizeSubclipName(subclip.name, "Mark subclip"),
+    summary: String(subclip.summary || "").slice(0, 4000),
+    startTime,
+    endTime,
+    duration: Number((endTime - startTime).toFixed(3)),
+    thumbnailUrl: String(subclip.thumbnailUrl || "")
+  };
+}
+
+function resultThumbnail(thumbnailUrl, altText) {
+  const wrap = document.createElement("div");
+  wrap.className = "result-thumbnail";
+  const img = document.createElement("img");
+  img.src = helperAssetUrl(thumbnailUrl);
+  img.alt = altText;
+  img.loading = "lazy";
+  img.addEventListener("error", function hideBrokenThumbnail() {
+    wrap.classList.add("hidden");
+  });
+  wrap.appendChild(img);
+  return wrap;
+}
+
+function nameSubclipsForAsset(asset, subclips) {
+  const usedNames = new Set();
+  const sourceName = sanitizeSubclipName(asset.displayName || asset.name || "Source clip", "Source clip");
+  const options = state.subclipNamingOptions || subclipNamingOptions();
+  return (subclips || []).map(function nameSubclip(subclip, subclipIndex) {
+    return {
+      ...subclip,
+      name: buildSubclipBatchName(sourceName, subclipIndex, options, usedNames)
+    };
+  });
 }
 
 function renderExportSettings(settings, config) {
@@ -875,35 +2242,79 @@ function renderExportSettings(settings, config) {
 
 function syncPreviewFromCards() {
   const cards = Array.from(dom["suggestion-list"].querySelectorAll(".suggestion-card"));
-  const markersByAsset = new Map();
+  const suggestionsByAsset = new Map();
 
   cards.forEach(function readCard(card) {
     const assetIndex = Number(card.dataset.assetIndex);
-    const marker = {
-      id: card.dataset.markerId,
-      use: card.querySelector(".marker-use").checked,
-      name: card.querySelector(".marker-name-input").value,
-      comment: card.querySelector(".marker-comment-input").value,
-      color: card.querySelector(".marker-color-select").value,
-      startTime: Number(card.querySelector(".marker-start-input").value),
-      endTime: Number(card.querySelector(".marker-end-input").value)
-    };
-    const list = markersByAsset.get(assetIndex) || [];
-    list.push(clampMarker(marker));
-    markersByAsset.set(assetIndex, list);
+    let suggestion;
+    if (card.dataset.kind === "subclip") {
+      const rawIndex = Number(card.dataset.subclipIndex);
+      const asset = state.selectedAssets[assetIndex];
+      const existing = asset && asset.subclips && asset.subclips[rawIndex] ? asset.subclips[rawIndex] : {};
+      const summaryInput = card.querySelector(".subclip-summary-input");
+      suggestion = clampSubclip({
+        id: card.dataset.subclipId,
+        use: card.querySelector(".subclip-use").checked,
+        name: existing.name || "Mark subclip",
+        summary: summaryInput ? summaryInput.value : existing.summary,
+        startTime: Number(existing.startTime),
+        endTime: Number(existing.endTime),
+        thumbnailUrl: existing.thumbnailUrl
+      });
+      suggestion.rawIndex = rawIndex;
+    } else {
+      const rawIndex = Number(card.dataset.markerIndex);
+      const asset = state.selectedAssets[assetIndex];
+      const existing = asset && asset.markers && asset.markers[rawIndex] ? asset.markers[rawIndex] : {};
+      suggestion = clampMarker({
+        id: card.dataset.markerId,
+        use: card.querySelector(".marker-use").checked,
+        name: card.querySelector(".marker-name-input").value,
+        comment: card.querySelector(".marker-comment-input").value,
+        color: card.querySelector(".marker-color-select").value,
+        startTime: Number(card.querySelector(".marker-start-input").value),
+        endTime: Number(card.querySelector(".marker-end-input").value),
+        thumbnailUrl: existing.thumbnailUrl
+      });
+    }
+    const list = suggestionsByAsset.get(assetIndex) || [];
+    if (card.dataset.kind === "subclip" && Number.isFinite(suggestion.rawIndex)) {
+      list[suggestion.rawIndex] = suggestion;
+    } else {
+      list.push(suggestion);
+    }
+    suggestionsByAsset.set(assetIndex, list);
   });
 
-  state.selectedAssets.forEach(function updateAssetMarkers(asset, index) {
-    asset.markers = markersByAsset.get(index) || asset.markers || [];
+  state.selectedAssets.forEach(function updateAssetSuggestions(asset, index) {
+    if (isSubclipMode()) {
+      const subclips = suggestionsByAsset.get(index);
+      asset.subclips = subclips
+        ? subclips.filter(function existingOnly(subclip) {
+          return Boolean(subclip);
+        })
+        : asset.subclips || [];
+    } else {
+      asset.markers = suggestionsByAsset.get(index) || asset.markers || [];
+    }
   });
 
   cards.forEach(function updateComputedFields(card) {
     const assetIndex = Number(card.dataset.assetIndex);
-    const markers = markersByAsset.get(assetIndex) || [];
+    const suggestions = suggestionsByAsset.get(assetIndex) || [];
     const siblingCards = Array.from(card.parentNode.querySelectorAll(".suggestion-card"));
-    const marker = markers[siblingCards.indexOf(card)];
-    card.classList.toggle("is-muted", marker.use === false);
-    card.querySelector("[data-role='timecode']").textContent = formatMarkerIn(marker);
+    const suggestion = suggestions[siblingCards.indexOf(card)];
+    card.classList.toggle("is-muted", suggestion.use === false);
+    const timecode = card.querySelector("[data-role='timecode']");
+    if (card.dataset.kind === "subclip") {
+      updateSubclipTiming(timecode, suggestion);
+    } else {
+      timecode.textContent = formatMarkerIn(suggestion);
+    }
+    const duration = card.querySelector("[data-role='duration']");
+    if (duration) {
+      duration.textContent = formatDuration(subclipDuration(suggestion));
+    }
   });
 
   setBusy(state.isBusy);
@@ -930,6 +2341,7 @@ function handleDrop(event) {
   let dragList = [];
   try {
     dragList = parseDropEvent(event);
+    appendDebugEvent("Drop payload", dragList);
   } catch (error) {
     setStatus("The dropped Avid data could not be read.", true);
     return;
@@ -951,13 +2363,18 @@ function handleDrop(event) {
   selectAssets(dragList.map(function mapAsset(asset) {
     return {
       id: asset.id,
-      name: asset.name,
-      displayName: asset.displayName,
-      mobName: asset.mobName,
+      name: asset.name || asset.Name || asset.clipName || asset.clip_name || "",
+      displayName: asset.displayName || asset.display_name || asset.name || asset.Name || asset.mobName || asset.mob_name || "",
+      mobName: asset.mobName || asset.mob_name || "",
       type: asset.type,
       head: asset.head,
       inMark: asset.in,
       outMark: asset.out,
+      binPath: asset.binPath || asset.bin_path || asset.absoluteBinPath || asset.absolute_bin_path || asset.relativeBinPath || asset.relative_bin_path || "",
+      systemId: asset.systemID || asset.systemId,
+      systemType: asset.systemType,
+      columns: asset.columns || asset.columnValues || asset.binColumns || {},
+      rawDropData: asset,
       source: "drop"
     };
   }), {
@@ -975,21 +2392,35 @@ function selectAssets(assets, options) {
     return asset && asset.id;
   }).map(function normalizeAsset(asset, index) {
     const sourceName = candidateAssetName(asset);
+    const fallbackName = asset.displayName || asset.name || asset.mobName || asset.mob_name || fallbackAssetName(asset);
     return {
       id: asset.id,
-      name: asset.name || asset.displayName || asset.mobName || "",
-      displayName: sourceName || fallbackAssetName(asset),
+      name: sourceName || fallbackName,
+      displayName: sourceName || fallbackName,
+      mobName: asset.mobName || asset.mob_name || "",
       needsNameHydration: !sourceName,
       type: asset.type || "clip",
       head: asset.head,
       inMark: asset.inMark,
       outMark: asset.outMark,
+      binPath: asset.binPath || "",
+      binPathSource: asset.binPath ? "drop" : "",
+      systemId: asset.systemId || asset.systemID || "",
+      systemType: asset.systemType || "",
+      columns: asset.columns || {},
+      rawDropData: asset.rawDropData || null,
       source: asset.source || "unknown",
       status: "idle",
       message: "Ready",
       exportTaskId: null,
       helperJobId: null,
+      helperDebugEventCount: 0,
+      exportPath: null,
+      proxySource: null,
+      proxyCandidates: null,
+      proxyLookupMessage: "",
       markers: [],
+      subclips: [],
       applied: false
     };
   });
@@ -998,6 +2429,18 @@ function selectAssets(assets, options) {
     setStatus("Mark could not read clip IDs from that selection.", true);
     return;
   }
+  appendDebugEvent("Selected assets normalized", normalizedAssets.map(function summarize(asset) {
+    return {
+      id: asset.id,
+      name: asset.name,
+      displayName: asset.displayName,
+      mobName: asset.mobName,
+      binPath: asset.binPath,
+      binPathSource: asset.binPathSource,
+      columns: asset.columns,
+      rawDropData: asset.rawDropData
+    };
+  }));
 
   if (append) {
     const existingIds = new Set(state.selectedAssets.map(function mapId(asset) {
@@ -1016,14 +2459,17 @@ function selectAssets(assets, options) {
   setViewMode("prompt");
   setStatus(`Reading ${normalizedAssets.length} clip${normalizedAssets.length === 1 ? "" : "s"}...`);
   setBusy(true);
-  Promise.all([
-    loadProjectInfo(),
-    hydrateAssetNames(normalizedAssets)
-  ]).then(function loaded() {
+  loadProjectInfo().then(function hydrateAfterProject() {
+    return Promise.all([
+      hydrateAssetNames(normalizedAssets),
+      hydrateAssetBinPaths(normalizedAssets)
+    ]);
+  }).then(function loaded() {
+    renderAvidMetadataColumnOptions();
     renderAsset();
     renderPreview();
     renderProject();
-    setStatus("Ready. Tell me what to find.");
+    setStatus(isSubclipMode() ? "Ready. Tell me what to pull." : "Ready. Tell me what to find.");
     setBusy(false);
   }).catch(function failed(error) {
     setStatus(error.message, true);
@@ -1034,12 +2480,18 @@ function selectAssets(assets, options) {
 function resetForNewAsset() {
   cleanupRetainedJobs();
   state.selectedAssets = [];
+  state.activeQueueItemId = null;
   state.activeClipIndex = -1;
   state.currentJobClipIndex = -1;
   state.activeReviewClipIndex = -1;
   state.batchConfig = null;
   state.batchPrompt = "";
-  clearPoll();
+  if (state.queueItems.length === 0) {
+    clearPoll();
+  } else {
+    ensureQueuePolling();
+  }
+  setProgressIndeterminate(false);
   setProgress(0);
   renderPreview();
 }
@@ -1123,26 +2575,39 @@ function readSelectedBinItems() {
 
 function hydrateAssetNames(assets) {
   return Promise.all((assets || []).map(function hydrate(asset) {
-    if (!asset || !asset.id || !asset.needsNameHydration) {
+    if (!asset || !asset.id) {
       return Promise.resolve();
     }
 
-    return readMobNameColumn(asset.id).then(function named(name) {
+    return readMobColumns(asset.id).then(function hydrateColumns(columns) {
+      asset.columns = {
+        ...(asset.columns || {}),
+        ...columns
+      };
+      const name = candidateAssetName({
+        ...asset,
+        columns: asset.columns
+      });
       if (!name) {
         return;
       }
       asset.name = name;
       asset.displayName = name;
       asset.needsNameHydration = false;
-    }).catch(function ignoreNameLookup() {});
+      appendDebugEvent("Mob columns hydrated", {
+        mobId: asset.id,
+        name,
+        columns
+      });
+    }).catch(function ignoreColumnLookup() {});
   }));
 }
 
-function readMobNameColumn(mobId) {
+function readMobColumns(mobId) {
   return new Promise(function read(resolve, reject) {
     const request = new GetMobInfoRequest();
     const body = new GetMobInfoRequestBody();
-    let resolved = false;
+    const entries = [];
 
     body.setMobId(mobId);
     body.setOnlyVisibleColumns(false);
@@ -1165,22 +2630,20 @@ function readMobNameColumn(mobId) {
 
       const columnName = String(responseBody.getColumnName() || "").trim().toLowerCase();
       const columnValue = String(responseBody.getColumnValue() || "").trim();
-      if (columnName === "name" && columnValue) {
-        resolved = true;
-        resolve(columnValue);
+      if (columnName && columnValue) {
+        entries.push({
+          name: responseBody.getColumnName(),
+          value: responseBody.getColumnValue()
+        });
       }
     });
 
     stream.on("error", function onError(error) {
-      if (!resolved) {
-        reject(error);
-      }
+      reject(error);
     });
 
     stream.on("end", function onEnd() {
-      if (!resolved) {
-        resolve("");
-      }
+      resolve(normalizeMobColumns(entries));
     });
   });
 }
@@ -1204,6 +2667,31 @@ function getBinPathFromMob(mobId) {
   });
 }
 
+function hydrateAssetBinPaths(assets) {
+  return Promise.all((assets || []).map(function hydrate(asset) {
+    if (!asset || !asset.id || asset.binPath) {
+      return Promise.resolve();
+    }
+
+    return getBinPathFromMob(asset.id).then(function setBinPath(binPath) {
+      asset.binPath = binPath || "";
+      asset.binPathSource = asset.binPath ? "GetBinFromMob on drop" : "";
+      appendDebugEvent("Asset bin path hydrated", {
+        clip: asset.name || asset.displayName || "clip",
+        mobId: asset.id,
+        binPath: asset.binPath,
+        projectRelativeCandidates: binRelativePathCandidates(asset.binPath)
+      });
+    }).catch(function ignoreBinPathLookup(error) {
+      appendDebugEvent("Asset bin path hydration failed", {
+        clip: asset.name || asset.displayName || "clip",
+        mobId: asset.id,
+        error: error.message || String(error)
+      });
+    });
+  }));
+}
+
 function openBinForWrite(binPath, requestLock) {
   return new Promise(function open(resolve, reject) {
     const request = new OpenBinRequest();
@@ -1223,7 +2711,17 @@ function openBinForWrite(binPath, requestLock) {
 }
 
 function ensureAssetBinOpenForWrite(asset) {
-  return getBinPathFromMob(asset.id).then(function openOwningBin(binPath) {
+  const resolveBinPath = asset && asset.binPath
+    ? Promise.resolve(asset.binPath)
+    : getBinPathFromMob(asset.id).then(function rememberBinPath(binPath) {
+      if (asset) {
+        asset.binPath = binPath || "";
+        asset.binPathSource = asset.binPath ? "GetBinFromMob on apply" : "";
+      }
+      return binPath;
+    });
+
+  return resolveBinPath.then(function openOwningBin(binPath) {
     if (!binPath) {
       throw new Error(`No bin path found for ${asset.name || "clip"}`);
     }
@@ -1231,12 +2729,16 @@ function ensureAssetBinOpenForWrite(asset) {
     return openBinForWrite(binPath, true).then(function locked() {
       return {
         binPath,
+        binPathSource: asset && asset.binPathSource || "",
+        relativeCandidates: binRelativePathCandidates(binPath),
         lockMode: "opened with write lock"
       };
     }).catch(function retryUnlocked(lockError) {
       return openBinForWrite(binPath, false).then(function unlocked() {
         return {
           binPath,
+          binPathSource: asset && asset.binPathSource || "",
+          relativeCandidates: binRelativePathCandidates(binPath),
           lockMode: `opened without explicit lock after lock error: ${lockError.message || lockError}`
         };
       });
@@ -1273,6 +2775,12 @@ function checkHelper(options) {
 
   return requestJson("GET", "/config").then(function ok(config) {
     state.helperConfig = config;
+    appendDebugEvent("Helper config", {
+      maxConcurrentJobs: config.maxConcurrentJobs,
+      proxyRoots: config.proxyRoots,
+      proxyExtensions: config.proxyExtensions,
+      hasTwelveLabsApiKey: config.hasTwelveLabsApiKey
+    });
     dom["connection-status"].textContent = "Online";
     dom["helper-status-dot"].dataset.status = "ready";
     dom["api-key-status"].textContent = config.hasTwelveLabsApiKey ? "Ready" : "Missing";
@@ -1280,6 +2788,7 @@ function checkHelper(options) {
     if (state.exportSettingsLoaded) {
       renderExportSettings(state.exportSettings, config);
     }
+    updateProxyRepositorySummary();
     if (!silent) {
       setStatus(config.hasTwelveLabsApiKey ? "Helper connected." : "Helper connected, but TWELVELABS_API_KEY is missing.", !config.hasTwelveLabsApiKey);
     }
@@ -1421,7 +2930,7 @@ function refreshExportSettings(showStatus) {
 function startAnalyze() {
   const prompt = dom["marker-prompt"].value.trim();
   if (state.selectedAssets.length === 0) {
-    setStatus("Drop one or more source clips first, or use selected bin clips.", true);
+    setStatus("Give me some clips first, then I'll take a look.", true);
     return;
   }
   if (!prompt) {
@@ -1433,28 +2942,22 @@ function startAnalyze() {
     return;
   }
 
-  cleanupRetainedJobs();
+  const queuedAssets = state.selectedAssets.slice();
+  const queuedProject = {
+    ...(state.project || {})
+  };
+  const queuedWorkflowMode = state.workflowMode;
+  const queuedOptions = {
+    prompt,
+    outputMode: queuedWorkflowMode,
+    subclipOptions: subclipOptions(),
+    markerOutputStyle: markerOutputStyle(),
+    metadataColumns: selectedAvidMetadataColumns(),
+    proxyRepository: proxyRepositorySettings()
+  };
+
   setBusy(true);
-  setViewMode("busy");
-  setProgress(5);
-  dom["progress-stage"].textContent = "Preparing analysis";
-  dom["progress-detail"].textContent = "";
-  state.selectedAssets.forEach(function resetClipRun(asset) {
-    asset.status = "queued";
-    asset.message = "Queued";
-    asset.exportTaskId = null;
-    asset.helperJobId = null;
-    asset.markers = [];
-    asset.applied = false;
-    asset.error = null;
-  });
-  state.activeClipIndex = -1;
-  state.currentJobClipIndex = -1;
-  state.batchConfig = null;
-  state.batchPrompt = prompt;
-  state.lastPrompt = prompt;
-  renderPreview();
-  setStatus(`Getting ready to look for ${prompt} across ${state.selectedAssets.length} clip${state.selectedAssets.length === 1 ? "" : "s"}...`);
+  setStatus("Adding clips to the render queue...");
 
   checkHelper()
     .then(function helperReady(config) {
@@ -1463,9 +2966,39 @@ function startAnalyze() {
       }
       return ensureExportSetting(config);
     })
-    .then(function exportReady(config) {
-      state.batchConfig = config;
-      processNextClip();
+    .then(function queueReady(config) {
+      const items = queuedAssets.map(function createItem(asset) {
+        return createQueueItem(asset, {
+          prompt,
+          workflowMode: queuedWorkflowMode,
+          options: queuedOptions,
+          project: queuedProject,
+          config
+        });
+      });
+      state.queueItems = state.queueItems.concat(items);
+      state.lastPrompt = prompt;
+      state.activeQueueItemId = null;
+      state.selectedAssets = [];
+      state.activeClipIndex = -1;
+      state.currentJobClipIndex = -1;
+      state.activeReviewClipIndex = -1;
+      state.batchPhase = "idle";
+      state.batchConfig = null;
+      state.batchPrompt = "";
+      state.batchOptions = null;
+      state.hasShownIncrementalReview = false;
+      setProgressIndeterminate(false);
+      setProgress(0);
+      dom["progress-detail"].textContent = "";
+      renderAsset();
+      renderPreview();
+      renderQueue();
+      setBusy(false);
+      setViewMode("drop");
+      showToast(`Added ${items.length} clip${items.length === 1 ? "" : "s"} to the render queue.`, "queued");
+      setStatus(`Added ${items.length} clip${items.length === 1 ? "" : "s"} to the render queue.`);
+      pumpQueue();
     })
     .catch(function failed(error) {
       if (error.requiresExportSetting) {
@@ -1473,34 +3006,540 @@ function startAnalyze() {
       } else {
         setStatus(error.message, true);
       }
+      setProgressIndeterminate(false);
       setProgress(0);
+      state.batchPhase = "idle";
       setBusy(false);
       setViewMode(inferMainViewMode());
     });
 }
 
-function updateBatchProgress(stagePercent) {
+function hasActiveProxyPreparation() {
+  return state.queueItems.some(function preparing(item) {
+    return item.status === "resolvingProxy" || item.status === "exporting";
+  });
+}
+
+function pumpQueue() {
+  state.queueItems.filter(function readyForHelper(item) {
+    return item.status === "proxyReady";
+  }).forEach(postQueueHelperJob);
+
+  if (hasActiveProxyPreparation()) {
+    renderQueue();
+    return;
+  }
+
+  const nextItem = state.queueItems.find(function next(item) {
+    return item.status === "queued";
+  });
+  if (nextItem) {
+    prepareQueueItemProxy(nextItem);
+    return;
+  }
+
+  ensureQueuePolling();
+  renderQueue();
+}
+
+function prepareQueueItemProxy(item) {
+  const proxySettings = item.options && item.options.proxyRepository || {};
+  const methods = Array.isArray(proxySettings.methods) ? proxySettings.methods : [];
+  const roots = Array.isArray(proxySettings.roots) ? proxySettings.roots : [];
+  const canUseSourcePath = proxySettings.enabled && methods.indexOf("sourcePath") !== -1;
+  const needsFolderSearch = proxySettings.enabled && methods.some(function needsRoots(method) {
+    return method === "sourceFile" || method === "clipName";
+  });
+
+  if (proxySettings.enabled && roots.length === 0 && !canUseSourcePath && needsFolderSearch) {
+    failQueueItem(item, "Proxy lookup is enabled, but no folders or Avid Source Path method are configured.");
+    openSettings();
+    pumpQueue();
+    return;
+  }
+
+  if (proxySettings.enabled && (roots.length > 0 || canUseSourcePath)) {
+    resolveExistingProxyForQueueItem(item).then(function resolved(found) {
+      if (found) {
+        postQueueHelperJob(item);
+        pumpQueue();
+        return;
+      }
+      exportProxyForQueueItem(item);
+    }).catch(function fallback(error) {
+      item.proxyLookupMessage = proxyLookupFallbackMessage(item.asset, "Proxy lookup failed.");
+      appendDebugEvent("Proxy lookup failed", {
+        clip: buildClipProxyMetadata(item.asset),
+        error: error.message || String(error)
+      });
+      appendAssetDebug(item.asset, "Existing proxy lookup failed", error.message || String(error));
+      exportProxyForQueueItem(item);
+    });
+    return;
+  }
+
+  exportProxyForQueueItem(item);
+}
+
+function resolveExistingProxyForQueueItem(item) {
+  const proxySettings = item.options.proxyRepository;
+  updateQueueItem(item, {
+    status: "resolvingProxy",
+    message: "Looking for existing proxy",
+    progress: 10
+  });
+
+  const requestBody = {
+    clip: buildClipProxyMetadata(item.asset),
+    roots: proxySettings.roots,
+    options: {
+      methods: proxySettings.methods,
+      extensions: proxySettings.extensions
+    }
+  };
+  appendDebugEvent("Proxy lookup request", requestBody);
+
+  return requestJson("POST", "/proxy/resolve", requestBody).then(function resolved(result) {
+    appendDebugEvent("Proxy lookup response", {
+      clip: requestBody.clip,
+      roots: requestBody.roots,
+      result
+    });
+    item.proxyCandidates = result.candidates || [];
+    if (result.status === "matched" && result.selected && result.selected.path) {
+      item.exportPath = result.selected.path;
+      item.proxySource = result.selected.sourceKind || "repository-proxy";
+      updateQueueItem(item, {
+        status: "proxyReady",
+        message: "Existing proxy found",
+        progress: 35,
+        exportPath: item.exportPath,
+        proxySource: item.proxySource,
+        proxyCandidates: item.proxyCandidates
+      });
+      appendAssetDebug(item.asset, "Existing proxy matched", result.selected);
+      return true;
+    }
+
+    if (result.status === "ambiguous") {
+      item.proxyLookupMessage = proxyLookupFallbackMessage(item.asset, `Proxy lookup found ${item.proxyCandidates.length} possible matches, but none were confident.`);
+      updateQueueItem(item, {
+        status: "queued",
+        message: "Proxy match ambiguous; exporting",
+        proxyCandidates: item.proxyCandidates,
+        proxyLookupMessage: item.proxyLookupMessage
+      });
+    } else {
+      item.proxyLookupMessage = proxyLookupFallbackMessage(item.asset, "Proxy lookup did not find a matching file.");
+      updateQueueItem(item, {
+        status: "queued",
+        message: "No existing proxy; exporting",
+        proxyCandidates: item.proxyCandidates,
+        proxyLookupMessage: item.proxyLookupMessage
+      });
+    }
+    appendAssetDebug(item.asset, "Existing proxy lookup", {
+      status: result.status,
+      candidates: result.candidates || [],
+      warnings: result.warnings || []
+    });
+    return false;
+  });
+}
+
+function exportProxyForQueueItem(item) {
+  const config = item.config || state.helperConfig || {};
+  const fileName = `mark_${Date.now()}_${state.queueItems.indexOf(item) + 1}.mp4`;
+  const exportSettingsName = config.resolvedExportSettingsName || configuredExportSettingName(config);
+  const request = new ExportFileRequest();
+  const body = new ExportFileRequestBody();
+  body.setMobId(item.asset.id);
+  body.setExportSettingsName(exportSettingsName);
+  body.setDestinationPath(config.exportDestinationPath || "");
+  body.setInDirectory("");
+  body.setFileName(fileName);
+  request.setBody(body);
+
+  item.pendingExport = {
+    prompt: item.prompt,
+    fileName,
+    exportSettingsName
+  };
+  updateQueueItem(item, {
+    status: "exporting",
+    message: item.proxyLookupMessage || "Exporting proxy",
+    progress: 20
+  });
+
+  client.exportFile(request, getMetadata(), function onExportStarted(err, response) {
+    if (err) {
+      const message = formatExportStartError(err, exportSettingsName);
+      failQueueItem(item, message);
+      pumpQueue();
+      mcapi.reportError(err.code, err.message);
+      return;
+    }
+
+    item.exportTaskId = response.getHeader().getTaskId();
+    state.activeExportQueueItemId = item.id;
+    updateQueueItem(item, {
+      exportTaskId: item.exportTaskId,
+      message: "Avid is making the proxy",
+      progress: 28
+    });
+  });
+}
+
+function handleQueueExportFinished(item, data) {
+  const noError = data.errorCode === CommandErrorType.NOERROR || data.errorCode === 0;
+  item.exportTaskId = null;
+  state.activeExportQueueItemId = state.activeExportQueueItemId === item.id ? null : state.activeExportQueueItemId;
+
+  if (!noError) {
+    failQueueItem(item, `Export failed for ${queueItemName(item)}: ${data.errorString || "Media Composer could not export this clip."}`);
+    pumpQueue();
+    return;
+  }
+
+  const exportPath = data.exportPath || data.path;
+  if (!exportPath) {
+    failQueueItem(item, `Export finished for ${queueItemName(item)}, but Media Composer did not return a proxy path.`);
+    pumpQueue();
+    return;
+  }
+
+  item.exportPath = exportPath;
+  item.proxySource = "avid-export";
+  item.proxyLookupMessage = "";
+  updateQueueItem(item, {
+    status: "proxyReady",
+    message: "Proxy ready",
+    progress: 35,
+    exportTaskId: null,
+    exportPath,
+    proxySource: "avid-export",
+    proxyLookupMessage: ""
+  });
+  postQueueHelperJob(item);
+  pumpQueue();
+}
+
+function postQueueHelperJob(item) {
+  if (!item || item.status !== "proxyReady" || !item.exportPath) {
+    return;
+  }
+
+  const options = item.options || {};
+  const promptContext = buildPromptContextFromAsset(item.asset, options.metadataColumns || selectedAvidMetadataColumns());
+  updateQueueItem(item, {
+    status: "analyzing",
+    message: "Queued for analysis",
+    progress: Math.max(40, Number(item.progress) || 40)
+  });
+
+  requestJson("POST", "/jobs", {
+    filePath: item.exportPath,
+    prompt: item.prompt,
+    outputMode: item.workflowMode,
+    subclipOptions: options.subclipOptions || subclipOptions(),
+    markerOutputStyle: options.markerOutputStyle || markerOutputStyle(),
+    promptContext,
+    clip: buildClipProxyMetadata(item.asset),
+    project: item.project || state.project,
+    mediaSourceKind: item.proxySource || "unknown"
+  }).then(function started(job) {
+    item.helperJobId = job.id;
+    item.helperDebugEventCount = 0;
+    updateQueueItem(item, {
+      helperJobId: job.id,
+      message: conciseJobMessage(job, "Analysis queued"),
+      progress: job.progress || item.progress || 40
+    });
+    ensureQueuePolling(true);
+  }).catch(function failed(error) {
+    failQueueItem(item, error.message);
+    pumpQueue();
+  });
+}
+
+function ensureQueuePolling(immediate) {
+  if (pollTimer) {
+    return;
+  }
+  const activeItems = state.queueItems.filter(function active(item) {
+    return item.status === "analyzing" && item.helperJobId;
+  });
+  if (activeItems.length === 0) {
+    return;
+  }
+  pollTimer = window.setTimeout(pollQueueJobs, immediate ? 0 : POLL_INTERVAL_MS);
+}
+
+function pollQueueJobs() {
+  clearPoll();
+  const activeItems = state.queueItems.filter(function active(item) {
+    return item.status === "analyzing" && item.helperJobId;
+  });
+
+  if (activeItems.length === 0) {
+    pumpQueue();
+    return;
+  }
+
+  Promise.all(activeItems.map(function poll(item) {
+    return requestJson("GET", `/jobs/${item.helperJobId}`).then(function jobReady(job) {
+      return {
+        item,
+        job
+      };
+    }).catch(function failed(error) {
+      return {
+        item,
+        error
+      };
+    });
+  })).then(function updateAll(results) {
+    results.forEach(function updateResult(result) {
+      if (result.error) {
+        if (/job not found/i.test(result.error.message || "")) {
+          failQueueItem(result.item, "Helper job was not found. Run this clip again.");
+          return;
+        }
+        updateQueueItem(result.item, {
+          message: result.error.message
+        });
+        return;
+      }
+      updateQueueItemFromJob(result.item, result.job);
+    });
+
+    if (state.viewMode === "review" && activeQueueItem()) {
+      renderPreview();
+    }
+    renderQueue();
+    pumpQueue();
+    ensureQueuePolling();
+  });
+}
+
+function updateQueueItemFromJob(item, job) {
+  appendNewHelperDebugEvents(item.asset, job);
+  item.helperDebugEventCount = item.asset.helperDebugEventCount || item.helperDebugEventCount || 0;
+  updateQueueItem(item, {
+    message: conciseJobMessage(job, item.message || "Analyzing"),
+    progress: job.progress || item.progress || 40
+  });
+
+  if (job.status === "ready") {
+    item.asset.status = "ready";
+    item.asset.message = "Analysis complete";
+    item.asset.reviewCompletionOrder = item.asset.reviewCompletionOrder || nextReviewCompletionOrder();
+    if ((job.outputMode || item.workflowMode) === "subclips") {
+      item.asset.subclips = nameSubclipsForAsset(item.asset, (job.subclips || []).map(function normalize(subclip) {
+        return clampSubclip({
+          id: subclip.id || createGuid(),
+          name: subclip.name,
+          summary: subclip.summary,
+          startTime: subclip.startTime,
+          endTime: subclip.endTime,
+          thumbnailUrl: subclip.thumbnailUrl,
+          use: true
+        });
+      }));
+    } else {
+      item.asset.markers = (job.markers || []).map(function normalize(marker) {
+        return clampMarker({
+          id: marker.id || createGuid(),
+          name: marker.name,
+          comment: marker.comment,
+          color: marker.color || "Yellow",
+          startTime: marker.startTime,
+          endTime: marker.endTime,
+          thumbnailUrl: marker.thumbnailUrl,
+          use: true
+        });
+      });
+    }
+    updateQueueItem(item, {
+      status: "ready",
+      message: "Analysis complete",
+      progress: 100
+    });
+    setStatus(`${queueItemName(item)} is ready to review.`);
+    showToast(`${queueItemName(item)} is ready to review.`, "ready");
+  } else if (job.status === "failed") {
+    failQueueItem(item, job.error ? job.error.message : "TwelveLabs analysis failed.");
+  }
+}
+
+function failQueueItem(item, message) {
+  if (!item) {
+    return;
+  }
+  if (state.activeExportQueueItemId === item.id) {
+    state.activeExportQueueItemId = null;
+  }
+  updateQueueItem(item, {
+    status: "failed",
+    message,
+    progress: 0,
+    error: message,
+    exportTaskId: null
+  });
+  item.asset.applied = false;
+  item.asset.error = message;
+  item.asset.helperJobId = item.helperJobId;
+  setStatus(message, true);
+  showToast(`${queueItemName(item)} could not finish processing.`, "failed");
+  renderQueue();
+}
+
+function updateBatchProgress(stagePercent, detail) {
   const total = Math.max(1, state.selectedAssets.length);
   const activeIndex = Math.max(0, state.activeClipIndex);
   const base = (activeIndex / total) * 100;
   const span = 100 / total;
   setProgress(base + (Math.max(0, Math.min(100, stagePercent)) / 100) * span);
-  dom["progress-detail"].textContent = `Clip ${Math.min(activeIndex + 1, total)} of ${total}`;
+  dom["progress-detail"].textContent = detail || `Clip ${Math.min(activeIndex + 1, total)}/${total}`;
 }
 
-function processNextClip() {
-  clearPoll();
+function updateAggregateProgress() {
+  const total = Math.max(1, state.selectedAssets.length);
+  const readyOrFailed = state.selectedAssets.filter(function done(asset) {
+    return asset.status === "ready" || asset.status === "failed";
+  }).length;
+  const proxyReady = state.selectedAssets.filter(function hasProxy(asset) {
+    return Boolean(asset.exportPath) || asset.status === "analyzing" || asset.status === "ready";
+  }).length;
+  const analyzing = state.selectedAssets.filter(function active(asset) {
+    return asset.status === "analyzing";
+  });
+  const analysisProgress = analyzing.reduce(function sumProgress(totalProgress, asset) {
+    return totalProgress + (Number(asset.jobProgress) || 35);
+  }, 0);
+
+  if (state.batchPhase === "exporting") {
+    setProgress(5 + (proxyReady / total) * 35);
+    dom["progress-detail"].textContent = `${proxyReady}/${total} proxies`;
+    return;
+  }
+
+  const completedProgress = readyOrFailed * 100;
+  const totalAnalysisProgress = completedProgress + analysisProgress;
+  setProgress(45 + (totalAnalysisProgress / (total * 100)) * 55);
+  dom["progress-detail"].textContent = `${readyOrFailed}/${total} clips`;
+}
+
+function processNextProxySource() {
+  state.batchPhase = "exporting";
   const nextIndex = state.selectedAssets.findIndex(function findQueued(asset) {
     return asset.status === "queued";
   });
 
   if (nextIndex === -1) {
-    finishBatch();
+    postHelperJobsForBatch();
     return;
   }
 
   state.activeClipIndex = nextIndex;
+  const proxySettings = state.batchOptions && state.batchOptions.proxyRepository;
+  const canUseSourcePath = proxySettings && proxySettings.enabled && proxySettings.methods.indexOf("sourcePath") !== -1;
+  const needsFolderSearch = proxySettings && proxySettings.enabled && proxySettings.methods.some(function needsRoots(method) {
+    return method === "sourceFile" || method === "clipName";
+  });
+  if (proxySettings && proxySettings.enabled && proxySettings.roots.length === 0 && !canUseSourcePath && needsFolderSearch) {
+    const asset = state.selectedAssets[nextIndex];
+    asset.proxyLookupMessage = proxyLookupFallbackMessage(asset, "Proxy lookup is enabled, but no folders are configured.");
+    asset.status = "queued";
+    asset.message = "Add proxy folders in Settings";
+    appendDebugEvent("Proxy lookup skipped", {
+      clip: buildClipProxyMetadata(asset),
+      reason: "No proxy folders configured"
+    });
+    appendAssetDebug(asset, "Existing proxy lookup skipped", "No proxy folders configured.");
+    state.batchPhase = "idle";
+    setBusy(false);
+    setProgressIndeterminate(false);
+    setProgress(0);
+    openSettings();
+    setStatus("Folder proxy lookup is enabled, but no folders or drives are configured. Add a folder, enable Avid Source Path, or turn lookup off.", true);
+    return;
+  }
+
+  if (proxySettings && proxySettings.enabled && (proxySettings.roots.length > 0 || canUseSourcePath)) {
+    resolveExistingProxyForClip(nextIndex).then(function resolved(found) {
+      if (found) {
+        processNextProxySource();
+        return;
+      }
+      exportProxyForClip(nextIndex);
+    }).catch(function fallback(error) {
+      const asset = state.selectedAssets[nextIndex];
+      asset.proxyLookupMessage = proxyLookupFallbackMessage(asset, "Proxy lookup failed.");
+      appendDebugEvent("Proxy lookup failed", {
+        clip: buildClipProxyMetadata(asset),
+        error: error.message || String(error)
+      });
+      appendAssetDebug(asset, "Existing proxy lookup failed", error.message || String(error));
+      exportProxyForClip(nextIndex);
+    });
+    return;
+  }
+
   exportProxyForClip(nextIndex);
+}
+
+function resolveExistingProxyForClip(assetIndex) {
+  const asset = state.selectedAssets[assetIndex];
+  const proxySettings = state.batchOptions.proxyRepository;
+  asset.status = "resolvingProxy";
+  asset.message = "Looking for existing proxy";
+  dom["progress-stage"].textContent = "Finding proxy";
+  setStatus("Finding proxy...");
+  updateAggregateProgress();
+
+  const requestBody = {
+    clip: buildClipProxyMetadata(asset),
+    roots: proxySettings.roots,
+    options: {
+      methods: proxySettings.methods,
+      extensions: proxySettings.extensions
+    }
+  };
+  appendDebugEvent("Proxy lookup request", requestBody);
+
+  return requestJson("POST", "/proxy/resolve", requestBody).then(function resolved(result) {
+    appendDebugEvent("Proxy lookup response", {
+      clip: requestBody.clip,
+      roots: requestBody.roots,
+      result
+    });
+    asset.proxyCandidates = result.candidates || [];
+    if (result.status === "matched" && result.selected && result.selected.path) {
+      asset.exportPath = result.selected.path;
+      asset.proxySource = result.selected.sourceKind || "repository-proxy";
+      asset.status = "proxyReady";
+      asset.message = "Existing proxy found";
+      appendAssetDebug(asset, "Existing proxy matched", result.selected);
+      updateAggregateProgress();
+      return true;
+    }
+
+    asset.status = "queued";
+    if (result.status === "ambiguous") {
+      asset.message = "Proxy match ambiguous; exporting";
+      asset.proxyLookupMessage = proxyLookupFallbackMessage(asset, `Proxy lookup found ${asset.proxyCandidates.length} possible matches, but none were confident.`);
+    } else {
+      asset.message = "No existing proxy; exporting";
+      asset.proxyLookupMessage = proxyLookupFallbackMessage(asset, "Proxy lookup did not find a matching file.");
+    }
+    appendAssetDebug(asset, "Existing proxy lookup", {
+      status: result.status,
+      candidates: result.candidates || [],
+      warnings: result.warnings || []
+    });
+    return false;
+  });
 }
 
 function exportProxyForClip(assetIndex) {
@@ -1510,7 +3549,7 @@ function exportProxyForClip(assetIndex) {
   asset.status = "exporting";
   asset.message = "Exporting proxy";
   dom["progress-stage"].textContent = "Exporting proxy";
-  setStatus(`Exporting proxy ${assetIndex + 1} of ${state.selectedAssets.length}: ${asset.name || "clip"}...`);
+  setStatus(asset.proxyLookupMessage || "Exporting proxy...");
   updateBatchProgress(15);
 
   const request = new ExportFileRequest();
@@ -1534,7 +3573,7 @@ function exportProxyForClip(assetIndex) {
     if (err) {
       const message = formatExportStartError(err, exportSettingsName);
       markClipFailed(assetIndex, message);
-      processNextClip();
+      processNextProxySource();
       mcapi.reportError(err.code, err.message);
       return;
     }
@@ -1542,7 +3581,7 @@ function exportProxyForClip(assetIndex) {
     asset.exportTaskId = response.getHeader().getTaskId();
     asset.message = "Avid is making the proxy";
     dom["progress-stage"].textContent = "Making proxy";
-    setStatus(`Avid is making proxy ${assetIndex + 1} of ${state.selectedAssets.length}...`);
+    setStatus(asset.proxyLookupMessage || "Making proxy...");
     updateBatchProgress(25);
   });
 }
@@ -1569,6 +3608,14 @@ function handleExportFinished(eventData) {
     return;
   }
 
+  const queueItem = state.queueItems.find(function findQueueExport(item) {
+    return item.exportTaskId && data.taskId === item.exportTaskId;
+  });
+  if (queueItem) {
+    handleQueueExportFinished(queueItem, data);
+    return;
+  }
+
   const assetIndex = state.selectedAssets.findIndex(function findByTaskId(asset) {
     return asset.exportTaskId && data.taskId === asset.exportTaskId;
   });
@@ -1581,7 +3628,7 @@ function handleExportFinished(eventData) {
   if (!noError) {
     asset.exportTaskId = null;
     markClipFailed(assetIndex, `Export failed for ${asset.name || "clip"}: ${data.errorString || "Media Composer could not export this clip."}`);
-    processNextClip();
+    processNextProxySource();
     return;
   }
 
@@ -1589,60 +3636,149 @@ function handleExportFinished(eventData) {
   if (!exportPath) {
     asset.exportTaskId = null;
     markClipFailed(assetIndex, `Export finished for ${asset.name || "clip"}, but Media Composer did not return a proxy path.`);
-    processNextClip();
+    processNextProxySource();
     return;
   }
 
   asset.exportTaskId = null;
-  startHelperJob(exportPath, asset.pendingExport ? asset.pendingExport.prompt : state.batchPrompt, assetIndex);
+  asset.exportPath = exportPath;
+  asset.proxySource = "avid-export";
+  asset.proxyLookupMessage = "";
+  asset.status = "proxyReady";
+  asset.message = "Proxy ready";
+  updateAggregateProgress();
+  processNextProxySource();
+}
+
+function postHelperJobsForBatch() {
+  const assets = state.selectedAssets.filter(function canAnalyze(asset) {
+    return asset.exportPath && asset.status !== "failed";
+  });
+  state.batchPhase = "postingJobs";
+  state.activeClipIndex = -1;
+  dom["progress-stage"].textContent = "Starting analysis";
+  setStatus("Starting analysis...");
+  setProgress(45);
+
+  if (assets.length === 0) {
+    finishBatch();
+    return;
+  }
+
+  Promise.all(assets.map(function post(asset) {
+    return startHelperJob(asset.exportPath, state.batchPrompt, state.selectedAssets.indexOf(asset));
+  })).then(function posted() {
+    state.batchPhase = "analyzing";
+    updateAggregateProgress();
+    pollJobs();
+  });
 }
 
 function startHelperJob(filePath, prompt, assetIndex) {
   const asset = state.selectedAssets[assetIndex];
   asset.status = "analyzing";
-  asset.message = "Uploading and analyzing";
-  dom["progress-stage"].textContent = "Uploading and analyzing";
-  setStatus(`Looking for ${prompt} in ${asset.name || "clip"} (${assetIndex + 1} of ${state.selectedAssets.length})...`);
-  updateBatchProgress(35);
+  asset.message = "Queued for analysis";
+  asset.jobProgress = 5;
+  dom["progress-stage"].textContent = "Analyzing";
+  setStatus(`${activeAnalysisLabel()}...`);
+  updateAggregateProgress();
 
-  requestJson("POST", "/jobs", {
+  const options = state.batchOptions || {};
+  const promptContext = buildPromptContextFromAsset(asset, options.metadataColumns || selectedAvidMetadataColumns());
+  return requestJson("POST", "/jobs", {
     filePath,
     prompt,
-    markerOutputStyle: markerOutputStyle(),
-    clip: {
-      mobId: asset.id,
-      type: asset.type,
-      name: asset.name
-    },
-    project: state.project
+    outputMode: options.outputMode || state.workflowMode,
+    subclipOptions: options.subclipOptions || subclipOptions(),
+    markerOutputStyle: options.markerOutputStyle || markerOutputStyle(),
+    promptContext,
+    clip: buildClipProxyMetadata(asset),
+    project: state.project,
+    mediaSourceKind: asset.proxySource || "unknown"
   }).then(function started(job) {
     asset.helperJobId = job.id;
-    state.currentJobClipIndex = assetIndex;
-    setStatus(`Looking for ${prompt} in ${asset.name || "clip"}...`);
-    updateBatchProgress(job.progress || 40);
-    pollJob(assetIndex);
+    asset.helperDebugEventCount = 0;
+    asset.message = conciseJobMessage(job, "Analysis queued");
+    asset.jobProgress = job.progress || 5;
+    updateAggregateProgress();
   }).catch(function failed(error) {
     markClipFailed(assetIndex, error.message);
-    processNextClip();
   });
 }
 
-function pollJob(assetIndex) {
+function pollJobs() {
   clearPoll();
-  const asset = state.selectedAssets[assetIndex];
-  if (!asset || !asset.helperJobId) {
+  const activeAssets = state.selectedAssets.filter(function active(asset) {
+    return asset.status === "analyzing" && asset.helperJobId;
+  });
+
+  if (activeAssets.length === 0) {
+    finishBatch();
     return;
   }
 
-  requestJson("GET", `/jobs/${asset.helperJobId}`).then(function update(job) {
+  Promise.all(activeAssets.map(function poll(asset) {
+    return requestJson("GET", `/jobs/${asset.helperJobId}`).then(function jobReady(job) {
+      return {
+        asset,
+        job
+      };
+    });
+  })).then(function updateAll(results) {
     const prompt = state.batchPrompt || state.lastPrompt || "that";
-    updateBatchProgress(job.progress || 40);
-    setStatus(`Looking for ${prompt} in ${asset.name || "clip"} (${assetIndex + 1} of ${state.selectedAssets.length})...`);
 
-    if (job.status === "ready") {
-      clearPoll();
-      asset.status = "ready";
-      asset.message = "Analysis complete";
+    results.forEach(function updateAsset(result) {
+      updateAssetFromJob(result.asset, result.job);
+    });
+    renderPreview();
+    updateAggregateProgress();
+    showIncrementalReviewIfReady(prompt);
+
+    if (isBatchComplete()) {
+      finishBatch();
+      return;
+    }
+
+    setStatus(`${activeAnalysisLabel()}... ${completedClipCount()}/${state.selectedAssets.length} done`);
+    pollTimer = window.setTimeout(pollJobs, POLL_INTERVAL_MS);
+  }).catch(function failed(error) {
+    activeAssets.forEach(function markUnknown(asset) {
+      if (asset.status === "analyzing") {
+        asset.message = error.message;
+      }
+    });
+    pollTimer = window.setTimeout(pollJobs, POLL_INTERVAL_MS);
+  });
+}
+
+function updateAssetFromJob(asset, job) {
+  appendNewHelperDebugEvents(asset, job);
+  asset.message = conciseJobMessage(job, asset.message || "Analyzing");
+  asset.jobProgress = job.progress || asset.jobProgress || 40;
+  if (job.stage === "preparing") {
+    dom["progress-stage"].textContent = "Preparing media";
+  } else if (job.stage === "uploading") {
+    dom["progress-stage"].textContent = "Analyzing";
+  } else if (job.stage === "thumbnailing") {
+    dom["progress-stage"].textContent = "Creating thumbnails";
+  }
+  if (job.status === "ready") {
+    markReviewClipCompleted(asset);
+    asset.status = "ready";
+    asset.message = "Analysis complete";
+    if ((job.outputMode || state.workflowMode) === "subclips") {
+      asset.subclips = nameSubclipsForAsset(asset, (job.subclips || []).map(function normalize(subclip) {
+        return clampSubclip({
+          id: subclip.id || createGuid(),
+          name: subclip.name,
+          summary: subclip.summary,
+          startTime: subclip.startTime,
+          endTime: subclip.endTime,
+          thumbnailUrl: subclip.thumbnailUrl,
+          use: true
+        });
+      }));
+    } else {
       asset.markers = (job.markers || []).map(function normalize(marker) {
         return clampMarker({
           id: marker.id || createGuid(),
@@ -1651,28 +3787,58 @@ function pollJob(assetIndex) {
           color: marker.color || "Yellow",
           startTime: marker.startTime,
           endTime: marker.endTime,
+          thumbnailUrl: marker.thumbnailUrl,
           use: true
         });
       });
-      processNextClip();
-      return;
     }
+  }
+  if (job.status === "failed") {
+    const assetIndex = state.selectedAssets.indexOf(asset);
+    markClipFailed(assetIndex, job.error ? job.error.message : "TwelveLabs analysis failed.");
+  }
+}
 
-    if (job.status === "failed") {
-      clearPoll();
-      markClipFailed(assetIndex, job.error ? job.error.message : "TwelveLabs analysis failed.");
-      processNextClip();
-      return;
-    }
+function appendNewHelperDebugEvents(asset, job) {
+  const events = Array.isArray(job && job.debugEvents) ? job.debugEvents : [];
+  const startIndex = asset.helperDebugEventCount || 0;
+  if (events.length <= startIndex) {
+    return;
+  }
 
-    pollTimer = window.setTimeout(function pollAgain() {
-      pollJob(assetIndex);
-    }, POLL_INTERVAL_MS);
-  }).catch(function failed(error) {
-    clearPoll();
-    markClipFailed(assetIndex, error.message);
-    processNextClip();
+  events.slice(startIndex).forEach(function append(event) {
+    appendDebugEvent("Helper media prep", {
+      clip: asset.name || asset.displayName || "clip",
+      jobId: job.id,
+      event
+    });
+    appendAssetDebug(asset, event.label || "Helper media prep", event.details);
   });
+  asset.helperDebugEventCount = events.length;
+}
+
+function completedClipCount() {
+  return state.selectedAssets.filter(function complete(asset) {
+    return asset.status === "ready" || asset.status === "failed";
+  }).length;
+}
+
+function isBatchComplete() {
+  return state.selectedAssets.every(function complete(asset) {
+    return asset.status === "ready" || asset.status === "failed";
+  });
+}
+
+function showIncrementalReviewIfReady(prompt) {
+  if (state.hasShownIncrementalReview || !hasReviewableResults()) {
+    return;
+  }
+  state.hasShownIncrementalReview = true;
+  state.activeReviewClipIndex = normalizedActiveReviewClipIndex();
+  renderPreview();
+  setViewMode("review");
+  setBusy(true);
+  setStatus(`First ${currentSuggestionName(2)} are ready. Still analyzing.`);
 }
 
 function markClipFailed(assetIndex, message) {
@@ -1681,6 +3847,7 @@ function markClipFailed(assetIndex, message) {
     return;
   }
   asset.status = "failed";
+  markReviewClipCompleted(asset);
   asset.message = message;
   asset.error = message;
   asset.exportTaskId = null;
@@ -1690,26 +3857,30 @@ function markClipFailed(assetIndex, message) {
 }
 
 function finishBatch() {
-  const markerCount = totalMarkerCount();
+  clearPoll();
+  const suggestionCount = totalSuggestionCount();
   const failedCount = state.selectedAssets.filter(function failed(asset) {
     return asset.status === "failed";
   }).length;
   state.activeClipIndex = -1;
   state.currentJobClipIndex = -1;
+  state.batchPhase = "idle";
   state.activeReviewClipIndex = normalizedActiveReviewClipIndex();
+  setProgressIndeterminate(false);
   setProgress(100);
   renderPreview();
-  setBusy(false);
-  setViewMode(markerCount > 0 || failedCount > 0 ? "review" : "prompt");
+  setBusy(state.isApplying);
+  setViewMode(suggestionCount > 0 || failedCount > 0 ? "review" : "prompt");
 
-  if (markerCount > 0) {
-    setStatus(`Found ${markerCount} possible marker${markerCount === 1 ? "" : "s"} across ${state.selectedAssets.length - failedCount} clip${state.selectedAssets.length - failedCount === 1 ? "" : "s"}. Review before applying.${failedCount ? ` ${failedCount} clip${failedCount === 1 ? "" : "s"} failed.` : ""}`, failedCount > 0);
+  if (suggestionCount > 0) {
+    const reviewAction = isSubclipMode() ? "creating" : "applying";
+    setStatus(`Found ${suggestionCount} possible ${currentSuggestionName(suggestionCount)} across ${state.selectedAssets.length - failedCount} clip${state.selectedAssets.length - failedCount === 1 ? "" : "s"}. Review before ${reviewAction}.${failedCount ? ` ${failedCount} clip${failedCount === 1 ? "" : "s"} failed.` : ""}`, failedCount > 0);
     return;
   }
 
   setStatus(failedCount > 0
-    ? `No marker suggestions were created. ${failedCount} clip${failedCount === 1 ? "" : "s"} failed.`
-    : "I did not find matching marker suggestions. Try a broader search.",
+    ? `No ${currentSuggestionName(2)} suggestions were created. ${failedCount} clip${failedCount === 1 ? "" : "s"} failed.`
+    : `I did not find matching ${currentSuggestionName(2)} suggestions. Try a broader search.`,
   failedCount > 0);
 }
 
@@ -1722,7 +3893,13 @@ function clearPoll() {
 
 function cleanupRetainedJobs() {
   state.selectedAssets.forEach(function cleanupAsset(asset) {
+    if (isQueueAsset(asset)) {
+      return;
+    }
     if (!asset.helperJobId) {
+      return;
+    }
+    if (asset.status === "analyzing" || asset.status === "queued") {
       return;
     }
 
@@ -1737,8 +3914,77 @@ function clearClips() {
   renderAsset();
   renderPreview();
   setBusy(false);
-  setStatus("Drop clips in from an Avid bin, or use selected bin clips.");
+  setProgressIndeterminate(false);
+  setStatus("Drop some clips and I'll take a look.");
   setViewMode("drop");
+}
+
+function discardSuggestions() {
+  if (state.isBusy || state.selectedAssets.length === 0) {
+    return;
+  }
+  if (activeQueueItem()) {
+    state.activeQueueItemId = null;
+    state.selectedAssets = [];
+    state.activeReviewClipIndex = -1;
+    renderAsset();
+    renderPreview();
+    renderQueue();
+    setBusy(false);
+    setStatus("Returned to render queue.");
+    setViewMode("queue");
+    return;
+  }
+
+  clearAnalysisResults();
+  renderAsset();
+  renderPreview();
+  setBusy(false);
+  setProgressIndeterminate(false);
+  setStatus("Suggestions discarded. Ready to run again.");
+  setViewMode("prompt");
+}
+
+function removeSelectedClip(assetIndex) {
+  if (state.isBusy || assetIndex < 0 || assetIndex >= state.selectedAssets.length) {
+    return;
+  }
+
+  const removed = state.selectedAssets[assetIndex];
+  if (removed && removed.helperJobId) {
+    requestJson("DELETE", `/jobs/${encodeURIComponent(removed.helperJobId)}`).catch(function noop() {});
+  }
+
+  state.selectedAssets.splice(assetIndex, 1);
+  state.activeClipIndex = -1;
+  state.currentJobClipIndex = -1;
+  state.activeReviewClipIndex = -1;
+  state.batchConfig = null;
+  state.batchPrompt = "";
+  clearPoll();
+  setProgressIndeterminate(false);
+  setProgress(0);
+  dom["progress-detail"].textContent = "";
+  renderAsset();
+  renderPreview();
+  setBusy(false);
+
+  if (state.selectedAssets.length === 0) {
+    setStatus("Drop some clips and I'll take a look.");
+    setViewMode("drop");
+    return;
+  }
+
+  setStatus(`Removed ${removed && removed.displayName ? removed.displayName : "clip"}.`);
+  setViewMode(inferMainViewMode());
+}
+
+function applyCurrentSuggestions() {
+  if (isSubclipMode()) {
+    applySubclips();
+  } else {
+    applyMarkers();
+  }
 }
 
 function applyMarkers() {
@@ -1760,6 +4006,7 @@ function applyMarkers() {
     return;
   }
 
+  state.isApplying = true;
   setBusy(true);
   setStatus("Writing selected markers to Avid...");
   applyMarkerGroup(groups, 0, {
@@ -1772,9 +4019,12 @@ function applyMarkers() {
 function applyMarkerGroup(groups, groupIndex, totals) {
   if (groupIndex >= groups.length) {
     renderPreview();
-    setBusy(false);
+    state.isApplying = false;
+    setBusy(isBatchActive());
     if (totals.failed === 0) {
-      cleanupRetainedJobs();
+      if (!completeActiveQueueItemAfterApply()) {
+        cleanupRetainedJobs();
+      }
     }
     const firstDebugMessage = totals.debugMessages && totals.debugMessages[0];
     setStatus(totals.failed === 0
@@ -2050,6 +4300,837 @@ function verifyAppliedMarkers(asset, expectedMarkers, candidate, callback) {
   });
 }
 
+function sleep(ms) {
+  return new Promise(function wait(resolve) {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function ensureAvbPath(binPath) {
+  const text = String(binPath || "").trim();
+  return text.toLowerCase().endsWith(".avb") ? text : `${text}.avb`;
+}
+
+function stripAvbExtension(binPath) {
+  return String(binPath || "").trim().replace(/\.avb$/i, "");
+}
+
+function projectBinRelativePath(binPath) {
+  const avbPath = String(binPath || "").trim();
+  const projectPath = state.project && state.project.path ? String(state.project.path).trim() : "";
+  if (!projectPath) {
+    return avbPath;
+  }
+
+  const projectRoot = (projectPath.toLowerCase().endsWith(".avp")
+    ? projectPath.replace(/\/[^/]+$/, "")
+    : projectPath).replace(/\/+$/, "");
+  const normalizedBinPath = avbPath.replace(/\/+$/, "");
+  if (projectRoot && normalizedBinPath.toLowerCase().startsWith(`${projectRoot.toLowerCase()}/`)) {
+    return normalizedBinPath.slice(projectRoot.length + 1);
+  }
+  return normalizedBinPath;
+}
+
+function pathTailCandidates(value) {
+  const text = String(value || "").trim().replace(/\/+$/, "");
+  if (!text || text.indexOf("/") === -1) {
+    return [];
+  }
+
+  const parts = text.split("/").filter(Boolean);
+  const tails = [];
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const tail = parts.slice(index).join("/");
+    if (tail && tail.indexOf("/") !== -1) {
+      tails.push(tail);
+    }
+  }
+  tails.push(parts[parts.length - 1]);
+  return tails;
+}
+
+function uniqueTextValues(values) {
+  const seen = new Set();
+  return values.map(function clean(value) {
+    return String(value || "").trim();
+  }).filter(function unique(value) {
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function binRelativePathCandidates(binPath) {
+  const raw = String(binPath || "").trim();
+  const withAvb = raw ? ensureAvbPath(raw) : "";
+  const withoutAvb = stripAvbExtension(raw);
+  const relativeRaw = projectBinRelativePath(raw);
+  const relativeWithAvb = projectBinRelativePath(withAvb);
+  const relativeWithoutAvb = stripAvbExtension(relativeWithAvb || relativeRaw || withoutAvb);
+  const relativeTails = pathTailCandidates(relativeWithoutAvb)
+    .concat(pathTailCandidates(relativeWithAvb))
+    .concat(pathTailCandidates(withoutAvb))
+    .concat(pathTailCandidates(withAvb));
+  const basename = withoutAvb.split("/").filter(Boolean).pop() || "";
+
+  return uniqueTextValues([
+    relativeWithoutAvb,
+    basename,
+    basename ? ensureAvbPath(basename) : "",
+    ...relativeTails.map(stripAvbExtension),
+    ...relativeTails,
+    relativeWithoutAvb,
+    relativeRaw,
+    relativeWithAvb,
+    withoutAvb,
+    withAvb,
+    raw
+  ]);
+}
+
+function readBinItemsForRelativePath(relativePath) {
+  return new Promise(function read(resolve, reject) {
+    const request = new GetListOfBinItemsRequest();
+    const body = new GetListOfBinItemsRequestBody();
+    const flags = GetListOfBinItemsRequestBody.BinItemFlags;
+    const items = [];
+
+    if (typeof body.setBinRelativePath === "function") {
+      body.setBinRelativePath(relativePath);
+    }
+    body.setOnlyVisibleFlag(false);
+    body.setOnlySelectedFlag(false);
+    body.setBinFlagsList([
+      flags.ALLTYPES || flags.AllTypes || 0
+    ]);
+    request.setBody(body);
+
+    let stream;
+    try {
+      stream = client.getListOfBinItems(request, getMetadata());
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    stream.on("data", function onData(response) {
+      const responseBody = response.getBody();
+      if (!responseBody || !responseBody.getMobId()) {
+        return;
+      }
+      items.push({
+        mobId: responseBody.getMobId(),
+        mobName: responseBody.getMobName ? responseBody.getMobName() || "" : "",
+        mobSelected: responseBody.getMobSelected ? responseBody.getMobSelected() : false
+      });
+    });
+
+    stream.on("error", function onError(error) {
+      reject(new Error(`Could not read destination bin: ${error.message || error}`));
+    });
+
+    stream.on("end", function onEnd() {
+      resolve(items);
+    });
+  });
+}
+
+function readSelectedVisibleSubclipItems() {
+  return new Promise(function read(resolve, reject) {
+    const request = new GetListOfBinItemsRequest();
+    const body = new GetListOfBinItemsRequestBody();
+    const flags = GetListOfBinItemsRequestBody.BinItemFlags;
+    const items = [];
+
+    body.setOnlyVisibleFlag(true);
+    body.setOnlySelectedFlag(true);
+    body.setBinFlagsList([
+      flags.SUBCLIPS
+    ]);
+    request.setBody(body);
+
+    let stream;
+    try {
+      stream = client.getListOfBinItems(request, getMetadata());
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    stream.on("data", function onData(response) {
+      const responseBody = response.getBody();
+      if (!responseBody || !responseBody.getMobId()) {
+        return;
+      }
+      items.push({
+        mobId: responseBody.getMobId(),
+        mobName: responseBody.getMobName ? responseBody.getMobName() || "" : "",
+        mobSelected: responseBody.getMobSelected ? responseBody.getMobSelected() : true
+      });
+    });
+
+    stream.on("error", function onError(error) {
+      reject(new Error(`Could not read selected visible subclips: ${error.message || error}`));
+    });
+
+    stream.on("end", function onEnd() {
+      resolve(items);
+    });
+  });
+}
+
+async function tryReadSelectedVisibleSubclipItems(asset, label) {
+  try {
+    const items = await readSelectedVisibleSubclipItems();
+    if (asset) {
+      appendAssetDebug(asset, label || "Selected visible subclips", {
+        status: "ok",
+        items: summarizeBinItems(items)
+      });
+    }
+    return {
+      ok: true,
+      items,
+      error: null
+    };
+  } catch (error) {
+    if (asset) {
+      appendAssetDebug(asset, label || "Selected visible subclips", {
+        status: "failed",
+        error: error.message || String(error)
+      });
+    }
+    return {
+      ok: false,
+      items: [],
+      error
+    };
+  }
+}
+
+async function readBinItemsForPath(binPath, asset, label) {
+  const candidates = binRelativePathCandidates(binPath);
+  const failures = [];
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const relativePath = candidates[index];
+    try {
+      const items = await readBinItemsForRelativePath(relativePath);
+      if (asset) {
+        appendAssetDebug(asset, label || "Read destination bin", {
+          status: "ok",
+          attemptedRelativePath: relativePath,
+          candidates,
+          items: summarizeBinItems(items)
+        });
+      }
+      return {
+        relativePath,
+        items
+      };
+    } catch (error) {
+      failures.push({
+        relativePath,
+        error: error.message || String(error)
+      });
+    }
+  }
+
+  const message = failures.length > 0
+    ? failures.map(function formatFailure(failure) {
+      return `${failure.relativePath}: ${failure.error}`;
+    }).join(" | ")
+    : "No bin path candidates could be built.";
+  const error = new Error(`Could not read destination bin with any path candidate. ${message}`);
+  error.binReadFailures = failures;
+  throw error;
+}
+
+async function tryReadBinItemsForPath(binPath, asset, label) {
+  try {
+    const result = await readBinItemsForPath(binPath, asset, label);
+    return {
+      ok: true,
+      relativePath: result.relativePath,
+      items: result.items,
+      error: null
+    };
+  } catch (error) {
+    if (asset) {
+      appendAssetDebug(asset, label || "Read destination bin", {
+        status: "failed",
+        failures: error.binReadFailures || [],
+        error: error.message || String(error)
+      });
+    }
+    return {
+      ok: false,
+      relativePath: "",
+      items: [],
+      error
+    };
+  }
+}
+
+function summarizeBinItems(items) {
+  const list = (items || []).map(function summarize(item) {
+    return {
+      mobId: item.mobId || "",
+      mobName: item.mobName || "",
+      mobSelected: Boolean(item.mobSelected)
+    };
+  });
+  return {
+    count: list.length,
+    items: list.slice(-12)
+  };
+}
+
+function binItemSignature(item) {
+  return [
+    item && item.mobId || "",
+    item && item.mobName || ""
+  ].join("|");
+}
+
+function diffNewBinItems(beforeItems, afterItems) {
+  const beforeCounts = new Map();
+  (beforeItems || []).forEach(function countItem(item) {
+    const signature = binItemSignature(item);
+    beforeCounts.set(signature, (beforeCounts.get(signature) || 0) + 1);
+  });
+
+  return (afterItems || []).filter(function newOnly(item) {
+    const signature = binItemSignature(item);
+    const count = beforeCounts.get(signature) || 0;
+    if (count > 0) {
+      beforeCounts.set(signature, count - 1);
+      return false;
+    }
+    return true;
+  });
+}
+
+function pickCreatedSubclip(beforeItems, afterItems, sourceMobId) {
+  const sourceId = String(sourceMobId || "").trim();
+  const newItems = diffNewBinItems(beforeItems, afterItems).filter(function usable(item) {
+    return item.mobId && item.mobId !== sourceId;
+  });
+  return newItems.length > 0 ? newItems[newItems.length - 1] : null;
+}
+
+function pickSelectedCreatedSubclip(beforeRead, afterRead, sourceMobId) {
+  if (!afterRead || !afterRead.ok) {
+    return null;
+  }
+
+  const created = beforeRead && beforeRead.ok
+    ? pickCreatedSubclip(beforeRead.items, afterRead.items, sourceMobId)
+    : null;
+  if (created) {
+    return created;
+  }
+
+  const sourceId = String(sourceMobId || "").trim();
+  const selected = (afterRead.items || []).filter(function usable(item) {
+    return item.mobId && item.mobId !== sourceId;
+  });
+  return selected.length === 1 ? selected[0] : null;
+}
+
+function findBinItemByMobId(items, mobId) {
+  const id = String(mobId || "").trim();
+  if (!id) {
+    return null;
+  }
+  return (items || []).find(function sameMob(item) {
+    return String(item && item.mobId || "").trim() === id;
+  }) || null;
+}
+
+function responseHeaderSnapshot(response) {
+  const header = response && response.getHeader ? response.getHeader() : null;
+  if (!header) {
+    return null;
+  }
+  if (header.toObject) {
+    return header.toObject();
+  }
+  return {
+    warnings: header.getWarningsList ? header.getWarningsList() : []
+  };
+}
+
+function createSubclipRequestSnapshot(asset, subclip, binPath) {
+  const startFrame = secondsToFrames(subclip.startTime, state.project.fps);
+  const endFrame = Math.max(startFrame + 1, secondsToFrames(subclip.endTime, state.project.fps));
+  return {
+    requestedName: subclip.name,
+    sourceMobId: asset.id,
+    destinationBinPath: binPath ? ensureAvbPath(binPath) : "",
+    headFrame: startFrame,
+    endFrame,
+    durationFrames: endFrame - startFrame,
+    startSeconds: Number(subclip.startTime) || 0,
+    endSeconds: Number(subclip.endTime) || 0,
+    headTimecode: formatSubclipPoint(subclip.startTime),
+    endTimecode: formatSubclipPoint(subclip.endTime),
+    useClipBounds: false,
+    useMarksBounds: false,
+    retainMarks: false,
+    retainMarkers: false,
+    createNewSequence: false,
+    enabledTracksOnly: false,
+    addFramesAtHead: 0,
+    addFramesAtEnd: 0
+  };
+}
+
+function createSubclipWithPanelSDK(asset, subclip, binPath) {
+  return new Promise(function create(resolve, reject) {
+    const startFrame = secondsToFrames(subclip.startTime, state.project.fps);
+    const endFrame = Math.max(startFrame + 1, secondsToFrames(subclip.endTime, state.project.fps));
+    const requestSnapshot = createSubclipRequestSnapshot(asset, subclip, binPath);
+    const request = new CreateSubClipRequest();
+    const body = new CreateSubClipRequestBody();
+
+    body.setMobId(requestSnapshot.sourceMobId);
+    body.setDestinationBinPath(requestSnapshot.destinationBinPath);
+    body.setHeadFrame(startFrame);
+    body.setEndFrame(endFrame);
+    body.setUseClipBounds(false);
+    body.setUseMarksBounds(false);
+    body.setRetainMarks(false);
+    body.setRetainMarkers(false);
+    body.setCreateNewSequence(false);
+    body.setEnabledTracksOnly(false);
+    body.setAddFramesAtHead(0);
+    body.setAddFramesAtEnd(0);
+    request.setBody(body);
+
+    client.createSubClip(request, getMetadata(), function onCreateSubclip(err, response) {
+      if (err) {
+        reject(new Error(`CreateSubClip failed: ${err.message || err}`));
+        return;
+      }
+      resolve({
+        request: requestSnapshot,
+        responseHeader: responseHeaderSnapshot(response)
+      });
+    });
+  });
+}
+
+function renameMob(mobId, name) {
+  return new Promise(function rename(resolve, reject) {
+    const request = new SetMobInfoRequest();
+    const body = new SetMobInfoRequestBody();
+    const column = new ColumnInfo();
+
+    column.setColumnName("Name");
+    column.setColumnValue(sanitizeSubclipName(name));
+    body.setMobId(mobId);
+    body.setColumn(column);
+    request.setBody(body);
+
+    client.setMobInfo(request, getMetadata(), function onRename(err, response) {
+      if (err) {
+        reject(new Error(`SetMobInfo failed for Name: ${err.message || err}`));
+        return;
+      }
+      const bodyResponse = response && response.getBody ? response.getBody() : null;
+      const failures = bodyResponse && bodyResponse.getMobFailureList ? bodyResponse.getMobFailureList() : [];
+      const hasFailedColumns = failures.some(function hasFailure(failure) {
+        const failedColumns = failure.getFailedColumnsList ? failure.getFailedColumnsList() : [];
+        return failedColumns.length > 0;
+      });
+      if (hasFailedColumns) {
+        reject(new Error("SetMobInfo reported that the Name column could not be changed."));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+function selectMobInBin(binPath, mobId) {
+  return new Promise(function select(resolve, reject) {
+    const request = new SelectMobsInBinRequest();
+    const body = new SelectMobsInBinRequestBody();
+
+    body.setBinPath(ensureAvbPath(binPath));
+    body.setMobIdsList([mobId]);
+    body.setAddToSelection(false);
+    request.setBody(body);
+
+    client.selectMobsInBin(request, getMetadata(), function onSelect(err, response) {
+      if (err) {
+        reject(new Error(`SelectMobsInBin failed: ${err.message || err}`));
+        return;
+      }
+      const bodyResponse = response && response.getBody ? response.getBody() : null;
+      resolve({
+        selectedMobIds: bodyResponse && bodyResponse.getSelectedMobIdsList
+          ? bodyResponse.getSelectedMobIdsList()
+          : []
+      });
+    });
+  });
+}
+
+function nameFromMobColumns(columns) {
+  const source = columns && typeof columns === "object" ? columns : {};
+  const direct = source.Name || source.name;
+  if (direct) {
+    return String(direct).trim();
+  }
+  const key = Object.keys(source).find(function isName(columnName) {
+    return columnName.toLowerCase() === "name";
+  });
+  return key ? String(source[key] || "").trim() : "";
+}
+
+async function readMobName(mobId) {
+  const columns = await readMobColumns(mobId);
+  return nameFromMobColumns(columns);
+}
+
+async function readCreatedSubclipName(mobId, binPath, asset) {
+  try {
+    const name = await readMobName(mobId);
+    if (name) {
+      appendAssetDebug(asset, "GetMobInfo name read", {
+        mobId,
+        name
+      });
+      return {
+        name,
+        readOk: true,
+        source: "GetMobInfo"
+      };
+    }
+  } catch (error) {
+    appendAssetDebug(asset, "GetMobInfo name read failed", error.message || String(error));
+  }
+
+  const binRead = await tryReadBinItemsForPath(binPath, asset, "Destination bin name read fallback");
+  const item = findBinItemByMobId(binRead.items, mobId);
+  return {
+    name: item && item.mobName || "",
+    readOk: binRead.ok,
+    source: "GetListOfBinItems"
+  };
+}
+
+async function renameCreatedSubclip(asset, createdItem, requestedName, binPath) {
+  const cleanName = sanitizeSubclipName(requestedName);
+  const delays = [350, 800, 1400];
+  let finalName = createdItem.mobName || "";
+  let readOk = false;
+  let lastWarning = "";
+
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    try {
+      await selectMobInBin(binPath, createdItem.mobId);
+      appendAssetDebug(asset, "SelectMobsInBin before rename", {
+        mobId: createdItem.mobId,
+        attempt: attempt + 1
+      });
+    } catch (error) {
+      appendAssetDebug(asset, "SelectMobsInBin before rename warning", error.message || String(error));
+    }
+
+    appendAssetDebug(asset, "SetMobInfo rename request", {
+      mobId: createdItem.mobId,
+      from: finalName || createdItem.mobName,
+      to: cleanName,
+      attempt: attempt + 1
+    });
+    try {
+      await renameMob(createdItem.mobId, cleanName);
+    } catch (error) {
+      lastWarning = error.message || String(error);
+      appendAssetDebug(asset, "SetMobInfo rename warning", {
+        attempt: attempt + 1,
+        error: lastWarning
+      });
+    }
+
+    await sleep(delays[attempt]);
+    const observed = await readCreatedSubclipName(createdItem.mobId, binPath, asset);
+    finalName = observed.name || finalName;
+    readOk = readOk || observed.readOk;
+    appendAssetDebug(asset, "SetMobInfo rename observed", {
+      requestedName: cleanName,
+      finalName,
+      source: observed.source,
+      attempt: attempt + 1
+    });
+
+    if (finalName === cleanName) {
+      return {
+        finalName,
+        renameWarning: ""
+      };
+    }
+  }
+
+  return {
+    finalName,
+    renameWarning: lastWarning || subclipRenameVerificationWarning(cleanName, finalName, {
+      readOk,
+      found: Boolean(finalName)
+    })
+  };
+}
+
+async function createVerifiedSubclip(asset, subclip, binPath, beforeRead) {
+  const beforeItems = beforeRead && beforeRead.items ? beforeRead.items : [];
+  const beforeSelectedRead = await tryReadSelectedVisibleSubclipItems(asset, "Selected visible subclips before create");
+  const createResult = await createSubclipWithPanelSDK(asset, subclip, binPath);
+  appendAssetDebug(asset, "CreateSubClip returned", createResult);
+  await sleep(150);
+  let afterRead = await tryReadBinItemsForPath(binPath, asset, "Destination bin after 150ms");
+  let afterItems = afterRead.items;
+  let newItems = beforeRead && beforeRead.ok && afterRead.ok ? diffNewBinItems(beforeItems, afterItems) : [];
+  appendAssetDebug(asset, "Destination bin after 150ms", {
+    binPath: ensureAvbPath(binPath),
+    readRelativePath: afterRead.relativePath,
+    readOk: afterRead.ok,
+    before: summarizeBinItems(beforeItems),
+    after: summarizeBinItems(afterItems),
+    newItems
+  });
+  let createdItem = pickCreatedSubclip(beforeItems, afterItems, asset.id);
+
+  if (!createdItem && afterRead.ok) {
+    await sleep(250);
+    afterRead = await tryReadBinItemsForPath(binPath, asset, "Destination bin after retry");
+    afterItems = afterRead.items;
+    newItems = beforeRead && beforeRead.ok && afterRead.ok ? diffNewBinItems(beforeItems, afterItems) : [];
+    appendAssetDebug(asset, "Destination bin after retry", {
+      binPath: ensureAvbPath(binPath),
+      readRelativePath: afterRead.relativePath,
+      readOk: afterRead.ok,
+      after: summarizeBinItems(afterItems),
+      newItems
+    });
+    createdItem = pickCreatedSubclip(beforeItems, afterItems, asset.id);
+  }
+
+  if (!createdItem) {
+    const selectedAfterRead = await tryReadSelectedVisibleSubclipItems(asset, "Selected visible subclips after create");
+    createdItem = pickSelectedCreatedSubclip(beforeSelectedRead, selectedAfterRead, asset.id);
+    if (createdItem) {
+      appendAssetDebug(asset, "Created subclip found from selected visible fallback", createdItem);
+    }
+  }
+
+  if (!createdItem) {
+    if (!beforeRead || !beforeRead.ok || !afterRead.ok) {
+      return {
+        afterItems,
+        createdItem: null,
+        renameWarning: "CreateSubClip returned, but Mark could not verify or rename because GetListOfBinItems could not read the destination bin."
+      };
+    }
+    throw new Error(`Created "${subclip.name}", but could not verify the new subclip in the destination bin.`);
+  }
+
+  const renameResult = await renameCreatedSubclip(asset, createdItem, subclip.name, binPath);
+  const finalName = renameResult.finalName;
+  const renameWarning = renameResult.renameWarning;
+  afterRead = await tryReadBinItemsForPath(binPath, asset, "Destination bin after rename");
+  afterItems = afterRead.items;
+
+  return {
+    afterItems,
+    createdItem,
+    finalName,
+    renameWarning
+  };
+}
+
+function applySubclips() {
+  saveSubclipNamingOptions();
+  syncPreviewFromCards();
+  const namingOptions = subclipNamingOptions();
+  const groups = state.selectedAssets.map(function selectedForAsset(asset, assetIndex) {
+    const selectedSubclips = effectiveSubclipsForAsset(asset);
+    return {
+      asset,
+      assetIndex,
+      subclips: asset.applied ? [] : nameSubclipsForAsset(asset, selectedSubclips)
+    };
+  }).filter(function hasSubclips(group) {
+    return group.subclips.length > 0;
+  });
+  appendDebugEvent("Avid subclip apply clicked", {
+    namingOptions,
+    groupCount: groups.length,
+    groups: groups.map(function summarizeGroup(group) {
+      return {
+        clip: group.asset.name || group.asset.displayName || "clip",
+        mobId: group.asset.id || "",
+        requestedNames: group.subclips.map(function subclipName(subclip) {
+          return subclip.name;
+        })
+      };
+    })
+  });
+
+  if (groups.length === 0) {
+    setStatus("Select at least one subclip to create.", true);
+    return;
+  }
+
+  state.isApplying = true;
+  setBusy(true);
+  setStatus("Creating selected subclips in Avid...");
+  runSubclipApply(groups).catch(function failed(error) {
+    setStatus(error.message, true);
+    state.isApplying = false;
+    setBusy(isBatchActive());
+    renderPreview();
+  });
+}
+
+async function runSubclipApply(groups) {
+  const totals = {
+    applied: 0,
+    failed: 0,
+    warnings: [],
+    debugMessages: []
+  };
+
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    const group = groups[groupIndex];
+    const asset = group.asset;
+    const createdNames = [];
+    const warnings = [];
+    const namingOptions = subclipNamingOptions();
+    appendDebugEvent("Avid subclip apply started", {
+      clip: asset.name || asset.displayName || "clip",
+      mobId: asset.id || "",
+      selectedSubclips: group.subclips.length,
+      namingOptions,
+      requestedNames: group.subclips.map(function subclipName(subclip) {
+        return subclip.name;
+      })
+    });
+    asset.debugMessage = [
+      "DEBUG Create Subclips",
+      `clip=${asset.name || asset.displayName || "clip"}`,
+      `mobId=${asset.id}`,
+      `selectedSubclips=${group.subclips.length}`,
+      `naming=${JSON.stringify(namingOptions)}`,
+      `fps=${state.project.fps}`
+    ].join("\n");
+    asset.message = "Creating subclips";
+    renderPreview();
+    setStatus(`Creating ${group.subclips.length} subclip${group.subclips.length === 1 ? "" : "s"} from ${asset.name || "clip"} (${groupIndex + 1} of ${groups.length})...`);
+
+    try {
+      const binInfo = await ensureAssetBinOpenForWrite(asset);
+      asset.debugMessage += `\nbinPath=${binInfo.binPath}`;
+      asset.debugMessage += `\nbinPathSource=${binInfo.binPathSource || "unknown"}`;
+      asset.debugMessage += `\nbinOpen=${binInfo.lockMode}`;
+      let beforeRead = await tryReadBinItemsForPath(binInfo.binPath, asset, "Destination bin before create");
+      let beforeItems = beforeRead.items;
+      appendAssetDebug(asset, "Destination bin before create", {
+        binPath: ensureAvbPath(binInfo.binPath),
+        binPathSource: binInfo.binPathSource || "",
+        projectRelativeCandidates: binInfo.relativeCandidates || binRelativePathCandidates(binInfo.binPath),
+        readRelativePath: beforeRead.relativePath,
+        readOk: beforeRead.ok,
+        items: summarizeBinItems(beforeItems)
+      });
+
+      for (let subclipIndex = 0; subclipIndex < group.subclips.length; subclipIndex += 1) {
+        const subclip = group.subclips[subclipIndex];
+        appendAssetDebug(asset, `CreateSubClip request ${subclipIndex + 1}/${group.subclips.length}`, expectedSubclipWrite(subclip, asset, binInfo.binPath));
+        renderPreview();
+        const result = await createVerifiedSubclip(asset, subclip, binInfo.binPath, beforeRead);
+        beforeItems = result.afterItems;
+        beforeRead = {
+          ok: true,
+          relativePath: beforeRead.relativePath,
+          items: beforeItems,
+          error: null
+        };
+        createdNames.push(subclip.name);
+        if (result.renameWarning) {
+          warnings.push(`${subclip.name}: ${result.renameWarning}`);
+        }
+        if (result.createdItem) {
+          asset.debugMessage += `\nObserved final subclip name=${result.finalName || result.createdItem.mobName || ""}`;
+        }
+      }
+
+      asset.applied = true;
+      asset.message = warnings.length > 0
+        ? `Subclips created; rename warning: ${warnings[0]}`
+        : "Subclips created";
+      asset.debugMessage += `\nCreated subclips=${JSON.stringify(createdNames, null, 2)}`;
+      if (warnings.length > 0) {
+        asset.debugMessage += `\nWarnings=${warnings.join(" | ")}`;
+        totals.warnings.push(warnings[0]);
+      }
+      appendDebugEvent("Avid subclip apply finished", {
+        clip: asset.name || asset.displayName || "clip",
+        mobId: asset.id || "",
+        createdNames,
+        warnings
+      });
+      totals.applied += group.subclips.length;
+      renderPreview();
+    } catch (error) {
+      const debugMessage = avidErrorSummary("Create subclips failed", error);
+      asset.applied = false;
+      asset.message = debugMessage;
+      asset.debugMessage += `\nERROR ${debugMessage}`;
+      appendDebugEvent("Avid subclip apply failed", {
+        clip: asset.name || asset.displayName || "clip",
+        mobId: asset.id || "",
+        error: debugMessage
+      });
+      totals.debugMessages.push(debugMessage);
+      totals.failed += 1;
+      renderPreview();
+    }
+  }
+
+  state.isApplying = false;
+  setBusy(isBatchActive());
+  if (totals.failed === 0) {
+    if (!completeActiveQueueItemAfterApply()) {
+      cleanupRetainedJobs();
+    }
+  }
+  const firstDebugMessage = totals.debugMessages && totals.debugMessages[0];
+  setStatus(totals.failed === 0
+    ? totals.warnings.length > 0
+      ? `Created ${totals.applied} subclip${totals.applied === 1 ? "" : "s"} with rename warning: ${totals.warnings[0]}`
+      : `Created and verified ${totals.applied} subclip${totals.applied === 1 ? "" : "s"}.`
+    : firstDebugMessage || `Created ${totals.applied} subclip${totals.applied === 1 ? "" : "s"}; ${totals.failed} clip${totals.failed === 1 ? "" : "s"} failed.`,
+  totals.failed > 0 || totals.warnings.length > 0);
+}
+
+function expectedSubclipWrite(subclip, asset, binPath) {
+  const snapshot = asset && binPath
+    ? createSubclipRequestSnapshot(asset, subclip, binPath)
+    : null;
+  return {
+    name: subclip.name,
+    summary: subclip.summary || "",
+    ...(snapshot || createSubclipRequestSnapshot({ id: "" }, subclip, ""))
+  };
+}
+
 function toggleSettings() {
   if (state.viewMode === "settings") {
     closeSettings();
@@ -2072,14 +5153,22 @@ function registerEvents() {
       handleDrop(event);
     });
   });
-  dom["select-bin-button"].addEventListener("click", selectFromBin);
   dom["clear-clips-button"].addEventListener("click", clearClips);
+  dom["discard-suggestions-button"].addEventListener("click", discardSuggestions);
+  dom["queue-toggle"].addEventListener("click", toggleQueue);
   dom["settings-toggle"].addEventListener("click", toggleSettings);
+  dom["workflow-mode-markers"].addEventListener("click", function selectMarkerMode() {
+    setWorkflowMode("markers");
+  });
+  dom["workflow-mode-subclips"].addEventListener("click", function selectSubclipMode() {
+    setWorkflowMode("subclips");
+  });
   dom["marker-prompt"].addEventListener("input", function onPromptInput() {
     setBusy(state.isBusy);
   });
   dom["prompt-favorites-toggle"].addEventListener("click", function onFavoriteToggle(event) {
     event.stopPropagation();
+    setSubclipOptionsPopoverOpen(false);
     toggleFavoritePromptPopover();
   });
   dom["favorite-prompt-select"].addEventListener("change", function onFavoritePromptChange() {
@@ -2094,8 +5183,54 @@ function registerEvents() {
   dom["favorite-prompts-popover"].addEventListener("click", function onFavoritePopoverClick(event) {
     event.stopPropagation();
   });
+  dom["subclip-options-toggle"].addEventListener("click", function onSubclipOptionsToggle(event) {
+    event.stopPropagation();
+    setFavoritePromptPopoverOpen(false);
+    setSubclipOptionsPopoverOpen(dom["subclip-options-popover"].classList.contains("hidden"));
+  });
+  dom["subclip-duration-toggle"].addEventListener("click", function onSubclipDurationToggle(event) {
+    event.stopPropagation();
+    setFavoritePromptPopoverOpen(false);
+    setSubclipOptionsPopoverOpen(true, true);
+  });
+  dom["subclip-options-popover"].addEventListener("click", function onSubclipOptionsPopoverClick(event) {
+    event.stopPropagation();
+  });
+  dom["custom-duration-toggle"].addEventListener("click", function onCustomDurationToggle() {
+    setCustomDurationFieldsOpen(dom["subclip-duration-fields"].classList.contains("hidden"));
+  });
+  Array.from(document.querySelectorAll(".granularity-choice")).forEach(function bindGranularityChoice(button) {
+    button.addEventListener("click", function selectGranularity() {
+      dom["subclip-granularity"].value = button.dataset.granularity || "balanced";
+      applyGranularityDefaults();
+      setCustomDurationFieldsOpen(false);
+    });
+  });
+  dom["subclip-granularity"].addEventListener("change", applyGranularityDefaults);
+  dom["settings-subclip-granularity"].addEventListener("change", function onSettingsSubclipGranularityChange() {
+    applySettingsSubclipDefaults(true);
+  });
+  [
+    "subclip-min-duration",
+    "subclip-max-duration"
+  ].forEach(function bindSubclipDuration(id) {
+    dom[id].addEventListener("input", updateSubclipDurationSummary);
+    dom[id].addEventListener("change", saveSubclipOptions);
+  });
+  [
+    "settings-subclip-min-duration",
+    "settings-subclip-max-duration"
+  ].forEach(function bindSettingsSubclipDuration(id) {
+    dom[id].addEventListener("input", function onSettingsSubclipDurationInput() {
+      applySettingsSubclipDefaults(false);
+    });
+    dom[id].addEventListener("change", function onSettingsSubclipDurationChange() {
+      applySettingsSubclipDefaults(false);
+    });
+  });
   document.addEventListener("click", function onDocumentClick() {
     setFavoritePromptPopoverOpen(false);
+    setSubclipOptionsPopoverOpen(false);
   });
   Array.from(document.querySelectorAll(".example-chip")).forEach(function bindExample(button) {
     button.addEventListener("click", function useExample() {
@@ -2105,7 +5240,7 @@ function registerEvents() {
     });
   });
   dom["analyze-button"].addEventListener("click", startAnalyze);
-  dom["apply-button"].addEventListener("click", applyMarkers);
+  dom["apply-button"].addEventListener("click", applyCurrentSuggestions);
   dom["check-helper-button"].addEventListener("click", function onCheckHelper() {
     checkHelper().catch(function noop() {});
   });
@@ -2121,12 +5256,45 @@ function registerEvents() {
       setStatus(`Using "${state.selectedExportSettingsName}" for temporary proxy exports.`);
     }
   });
+  dom["review-thumbnail-size"].addEventListener("change", saveReviewThumbnailSize);
+  [
+    "proxy-repository-enabled",
+    "proxy-match-source-file",
+    "proxy-match-source-path",
+    "proxy-match-clip-name"
+  ].forEach(function bindProxyCheckbox(id) {
+    dom[id].addEventListener("change", saveProxyRepositorySettings);
+  });
+  dom["proxy-repository-roots"].addEventListener("input", updateProxyRepositorySummary);
+  dom["proxy-repository-roots"].addEventListener("change", saveProxyRepositorySettings);
+  dom["proxy-repository-roots"].addEventListener("blur", saveProxyRepositorySettings);
+  dom["debug-panel-enabled"].addEventListener("change", function onDebugPanelToggle() {
+    setDebugPanelEnabled(dom["debug-panel-enabled"].checked);
+  });
+  dom["debug-panel-clear"].addEventListener("click", function onDebugPanelClear() {
+    state.debugEvents = [];
+    renderDebugPanel();
+  });
   [
     "marker-name-style",
-    "marker-comment-style"
+    "marker-comment-style",
+    "subclip-summary-style"
   ].forEach(function bindStyleField(id) {
     dom[id].addEventListener("change", saveMarkerOutputStyle);
     dom[id].addEventListener("blur", saveMarkerOutputStyle);
+  });
+  dom["avid-metadata-columns"].addEventListener("change", saveAvidMetadataColumns);
+  [
+    "subclip-name-delimiter",
+    "subclip-name-suffix",
+    "subclip-name-start",
+    "subclip-name-padding"
+  ].forEach(function bindSubclipNameField(id) {
+    dom[id].addEventListener("input", function onSubclipNamingInput() {
+      saveSubclipNamingOptions(false);
+    });
+    dom[id].addEventListener("change", saveSubclipNamingOptions);
+    dom[id].addEventListener("blur", saveSubclipNamingOptions);
   });
   dom["export-setting-dialog-settings-button"].addEventListener("click", function onDialogSettings() {
     hideExportSettingDialog();
@@ -2151,11 +5319,19 @@ document.addEventListener("DOMContentLoaded", function main() {
   initDom();
   client = new MCAPIClient(mcapi.getGatewayServerAddress(), null, null);
   loadMarkerOutputStyle();
+  loadReviewThumbnailSize();
+  renderAvidMetadataColumnOptions();
+  loadSubclipOptions();
+  loadSubclipNamingOptions();
+  loadProxyRepositorySettings();
+  loadDebugPanelSetting();
   state.favoritePrompts = loadFavoritePrompts();
   registerEvents();
+  updateWorkflowControls();
   renderAsset();
   renderProject();
   renderPreview();
+  renderQueue();
   renderFavoritePrompts();
   setViewMode("drop");
   checkHelper({ silent: true }).catch(function noop() {});

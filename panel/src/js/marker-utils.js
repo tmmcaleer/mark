@@ -57,6 +57,7 @@ export function clampMarker(marker) {
     comment: String(marker.comment || "").slice(0, 4000),
     color: MARKER_COLORS.includes(marker.color) ? marker.color : "Yellow",
     startTime,
-    endTime
+    endTime,
+    thumbnailUrl: String(marker.thumbnailUrl || "")
   };
 }
