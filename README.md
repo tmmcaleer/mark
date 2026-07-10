@@ -11,7 +11,7 @@ Panel SDK Drop 13 files in `sdk-reference/PanelSDK_.13_Releases_2025`.
 
 - `panel/` - Avid panel web app and `.avpi` packaging scripts.
 - `premiere/` - Adobe Premiere Pro UXP panel source for the Mark Premiere host.
-- `helper-service/` - Local service with filesystem access and the TwelveLabs API key.
+- `helper-service/` - Mark bridge service with filesystem and host access.
 - `cloud-service/` - Hosted service for Supabase auth, Stripe credit packs, and metered TwelveLabs analysis.
 - `shared/analysis/` - Shared TwelveLabs prompt/result normalization used by hosted analysis.
 - `sdk-reference/` - Avid Panel SDK reference drops.
@@ -19,11 +19,11 @@ Panel SDK Drop 13 files in `sdk-reference/PanelSDK_.13_Releases_2025`.
 ## Requirements
 
 - Media Composer 2025.6.
-- Node.js 18 or newer for the helper service.
+- Node.js 18 or newer for local development of the helper service.
 - A small H.264 export preset in Media Composer. The panel defaults to
   `Mark 12Labs Proxy`, but can use any installed export setting selected in
   the panel.
-- `TWELVELABS_API_KEY` set in the helper service environment.
+- A Mark account for hosted analysis and credit packs.
 
 ## Run Locally
 
@@ -32,7 +32,7 @@ Start the helper:
 ```sh
 cd helper-service
 npm install
-TWELVELABS_API_KEY=... npm start
+npm start
 ```
 
 Build and package the panel:
@@ -126,7 +126,7 @@ scripts/notarize-package.sh signed-release/Mark-Production-v0.1.0.pkg
 
 The installer places the AVPI in Avid's Panel SDK folder and installs
 `/Applications/Mark-Helper.app` with LaunchAgent `com.mcdiva.mark.helper`.
-For dev-stage packages, the helper reads `TWELVELABS_API_KEY` from the bundled
+For dev-stage packages, the helper can read override values from the bundled
 `/Applications/Mark-Helper.app/Contents/Resources/.env` file.
 
 ## Distribution
@@ -148,22 +148,22 @@ MARK_DISTRIBUTE_PASSWORD='...' scripts/distribute-mark-zip.sh --execute
 
 Helper environment variables:
 
-- `TWELVELABS_API_KEY` - Required TwelveLabs API key.
+- `TWELVELABS_API_KEY` - Optional dev-only key for direct local TwelveLabs analysis when cloud analysis is disabled.
 - `MARK_HELPER_PORT` - Helper port, default `4500`.
 - `MARK_EXPORT_SETTING` - Avid export preset name, default `Mark 12Labs Proxy`.
 - `MARK_EXPORT_DIR` - Local export directory, default OS temp `mark-exports`.
 - `MARK_CLEANUP_EXPORTS` - Delete Mark proxy exports after analysis, default `true`. Set to `0` to keep them for debugging.
 - `MARK_MAX_UPLOAD_BYTES` - Direct upload limit, default `209715200`.
 - `TWELVELABS_API_BASE_URL` - Default `https://api.twelvelabs.io/v1.3`.
-- `MARK_CLOUD_URL` - Hosted Mark API URL. When set, helper analysis runs through the cloud service.
-- `MARK_CLOUD_ANALYSIS_ENABLED` - Force cloud analysis on/off. Defaults to enabled when `MARK_CLOUD_URL` is set.
+- `MARK_CLOUD_URL` - Hosted Mark API URL. Defaults to `https://mark-cloud-api.onrender.com`.
+- `MARK_CLOUD_ANALYSIS_ENABLED` - Force cloud analysis on/off. Defaults to enabled.
 - `MARK_SESSION_PATH` - Local path for the Mark session token, default OS app support/config location.
 - `MARK_OPEN_BROWSER` - Open sign-in and checkout URLs from the helper, default `true` outside tests.
 
 Cloud service environment variables:
 
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` - Server-side Supabase access.
-- `SUPABASE_PUBLISHABLE_KEY` - Browser magic-link/device sign-in page key.
+- `SUPABASE_PUBLISHABLE_KEY` - Browser account/device sign-in page key.
 - `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` - Checkout and webhook verification.
 - `MARK_CREDIT_PACKS` - JSON array of `{ "id", "label", "minutes", "stripePriceId" }` credit packs.
 - `MARK_SESSION_SECRET` - HMAC secret for Mark helper sessions.

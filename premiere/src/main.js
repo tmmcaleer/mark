@@ -195,7 +195,7 @@
 
   function accountCreditText(account) {
     if (!state.helperConfig || !state.helperConfig.cloudAnalysisEnabled) {
-      return "Local";
+      return "Unavailable";
     }
     const minutes = account && account.credits ? Number(account.credits.balanceMinutes) : 0;
     return `${Number.isFinite(minutes) ? minutes : 0} min`;
@@ -213,7 +213,7 @@
     const authenticated = cloudEnabled && account.authenticated;
     const packs = Array.isArray(account.creditPacks) ? account.creditPacks : [];
     if (dom["account-summary"]) {
-      dom["account-summary"].textContent = cloudEnabled ? authenticated ? accountCreditText(account) : "Sign in" : "Local";
+      dom["account-summary"].textContent = cloudEnabled ? authenticated ? accountCreditText(account) : "Sign in" : "Unavailable";
     }
     if (dom["account-button"]) {
       dom["account-button"].disabled = !cloudEnabled;
@@ -223,7 +223,7 @@
       dom["buy-credits-button"].disabled = !authenticated || packs.length === 0;
     }
     if (dom["account-detail"]) {
-      dom["account-detail"].textContent = cloudEnabled ? authenticated ? "Signed in for hosted analysis." : "Sign in to use hosted analysis." : "Local analysis mode.";
+      dom["account-detail"].textContent = cloudEnabled ? authenticated ? "Signed in for hosted analysis." : "Sign in or create an account to use Mark analysis." : "Mark account service unavailable.";
     }
     if (dom["account-credit-balance"]) {
       dom["account-credit-balance"].textContent = accountCreditText(account);
@@ -597,16 +597,15 @@
       }
       if (dom["api-key-status"]) {
         dom["api-key-status"].textContent = config.cloudAnalysisEnabled
-          ? "Cloud"
-          : config.hasTwelveLabsApiKey ? "Ready" : "Missing";
+          ? "Ready"
+          : "Unavailable";
       }
       if (dom["api-key-status-dot"]) {
-        dom["api-key-status-dot"].dataset.status = (config.cloudAnalysisEnabled || config.hasTwelveLabsApiKey) ? "ready" : "warning";
+        dom["api-key-status-dot"].dataset.status = config.cloudAnalysisEnabled ? "ready" : "warning";
       }
       refreshAccount({ silent: true }).catch(function noop() {});
       if (!silent) {
-        const analysisReady = config.cloudAnalysisEnabled || config.hasTwelveLabsApiKey;
-        setStatus(analysisReady ? "Helper connected." : "Helper connected, but TWELVELABS_API_KEY is missing.", !analysisReady);
+        setStatus(config.cloudAnalysisEnabled ? "Mark bridge connected." : "Mark account service unavailable.", !config.cloudAnalysisEnabled);
       }
       return config;
     } catch (error) {
@@ -654,7 +653,7 @@
 
   async function startSignIn() {
     if (!state.helperConfig || !state.helperConfig.cloudAnalysisEnabled) {
-      setStatus("Hosted Mark analysis is not configured.", true);
+      setStatus("Mark account service unavailable.", true);
       return;
     }
     clearAuthPoll();
@@ -663,7 +662,7 @@
         clientName: "Mark Premiere Panel"
       });
       state.authDeviceCode = payload.deviceCode || "";
-      setStatus("Check your browser to finish signing in.");
+      setStatus("Use your browser to sign in, create an account, or reset your password.");
       pollSignIn();
     } catch (error) {
       setStatus(error.message || String(error), true);
@@ -753,8 +752,8 @@
 
     try {
       const config = await checkHelper({ silent: true });
-      if (!config.cloudAnalysisEnabled && !config.hasTwelveLabsApiKey) {
-        throw new Error("TWELVELABS_API_KEY is not set in the helper service.");
+      if (!config.cloudAnalysisEnabled) {
+        throw new Error("Mark account service unavailable.");
       }
       if (accountRequiresSignIn()) {
         throw new Error("Sign in to Mark before analyzing media.");

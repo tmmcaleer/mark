@@ -64,6 +64,7 @@ test("helper queues jobs above the configured concurrency", async function () {
   const server = await listen(app);
   const port = server.address().port;
   const previousApiKey = config.twelveLabsApiKey;
+  const previousCloudEnabled = config.markCloudAnalysisEnabled;
   const previousMaxConcurrentJobs = config.maxConcurrentJobs;
   const exportDirectory = fs.mkdtempSync(path.join(require("os").tmpdir(), "mark-queue-"));
   const releases = [];
@@ -74,6 +75,7 @@ test("helper queues jobs above the configured concurrency", async function () {
   });
 
   config.twelveLabsApiKey = "test-key";
+  config.markCloudAnalysisEnabled = false;
   config.maxConcurrentJobs = 2;
   setJobRunnerForTest(async function fakeRunner(job) {
     job.status = "running";
@@ -127,6 +129,7 @@ test("helper queues jobs above the configured concurrency", async function () {
     assert.equal(jobQueueState().pendingJobCount, 0);
   } finally {
     config.twelveLabsApiKey = previousApiKey;
+    config.markCloudAnalysisEnabled = previousCloudEnabled;
     config.maxConcurrentJobs = previousMaxConcurrentJobs;
     setJobRunnerForTest(null);
     pendingJobs.splice(0);
@@ -139,9 +142,12 @@ test("helper queues jobs above the configured concurrency", async function () {
   }
 });
 
-test("helper rejects jobs when TWELVELABS_API_KEY is missing", async function () {
+test("helper rejects direct-analysis jobs when the local TwelveLabs key is missing", async function () {
   const server = await listen(app);
   const port = server.address().port;
+  const previousCloudEnabled = config.markCloudAnalysisEnabled;
+
+  config.markCloudAnalysisEnabled = false;
 
   try {
     const response = await fetch(`http://127.0.0.1:${port}/jobs`, {
@@ -158,7 +164,9 @@ test("helper rejects jobs when TWELVELABS_API_KEY is missing", async function ()
     assert.equal(response.status, 503);
     const body = await response.json();
     assert.equal(body.error.code, "MISSING_API_KEY");
+    assert.equal(body.error.message, "Mark cloud analysis is not configured");
   } finally {
+    config.markCloudAnalysisEnabled = previousCloudEnabled;
     await close(server);
   }
 });

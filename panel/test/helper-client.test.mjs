@@ -67,14 +67,14 @@ test("uses helper error payload messages", async function () {
     XMLHttpRequestClass: createMockXhr([
       {
         status: 503,
-        responseText: "{\"error\":{\"message\":\"TWELVELABS_API_KEY is missing\"}}"
+        responseText: "{\"error\":{\"message\":\"Mark account service unavailable\"}}"
       }
     ], [])
   });
 
   await assert.rejects(
     client.requestJson("POST", "jobs", {}),
-    /TWELVELABS_API_KEY is missing/
+    /Mark account service unavailable/
   );
 });
 

@@ -74,7 +74,7 @@ app.get("/config", function getConfig(req, res) {
     thumbnailWidth: config.thumbnailWidth,
     maxThumbnailsPerJob: config.maxThumbnailsPerJob,
     hasTwelveLabsApiKey: Boolean(config.twelveLabsApiKey),
-    analysisMode: config.markCloudAnalysisEnabled ? "cloud" : "local",
+    analysisMode: "cloud",
     cloudAnalysisEnabled: config.markCloudAnalysisEnabled,
     cloudUrl: config.markCloudUrl,
     hasMarkSession: Boolean(readSession(config.markSessionPath).token)
@@ -85,9 +85,10 @@ app.get("/account", function getAccountRoute(req, res) {
   if (!config.markCloudAnalysisEnabled) {
     res.json({
       authenticated: false,
-      analysisMode: "local",
+      analysisMode: "cloud",
+      serviceUnavailable: true,
       credits: {
-        balanceMinutes: null
+        balanceMinutes: 0
       },
       creditPacks: []
     });
@@ -119,7 +120,7 @@ app.post("/auth/device/start", function startDeviceRoute(req, res) {
     res.status(503).json({
       error: {
         code: "CLOUD_NOT_CONFIGURED",
-        message: "MARK_CLOUD_URL is not configured"
+        message: "Mark account service is not configured"
       }
     });
     return;
@@ -183,7 +184,7 @@ app.post("/jobs", function createJobRoute(req, res) {
     res.status(503).json({
       error: {
         code: "MISSING_API_KEY",
-        message: "TWELVELABS_API_KEY is not set in the helper service environment"
+        message: "Mark cloud analysis is not configured"
       }
     });
     return;
@@ -481,7 +482,7 @@ function sendError(res, error) {
 
 function cloudRequest(method, requestPath, body, options = {}) {
   if (!config.markCloudUrl) {
-    return Promise.reject(new MarkError("MARK_CLOUD_URL is not configured", {
+    return Promise.reject(new MarkError("Mark account service is not configured", {
       code: "CLOUD_NOT_CONFIGURED",
       statusCode: 503
     }));

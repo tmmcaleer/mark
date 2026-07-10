@@ -13,7 +13,7 @@
         </div>
         <div class="topbar-actions">
           <button id="account-button" class="account-button secondary-button" type="button" title="Mark account">
-            <span id="account-summary">Local</span>
+            <span id="account-summary">Sign in</span>
           </button>
           <button id="buy-credits-button" class="secondary-button hidden" type="button">Buy</button>
           <button id="queue-toggle" class="icon-button secondary-button queue-toggle" type="button" aria-label="Render queue" title="Render queue" aria-expanded="false" aria-controls="queue-view">
@@ -367,12 +367,12 @@
             <section class="settings-section" aria-labelledby="settings-account-heading">
               <div class="settings-section-heading">
                 <h3 id="settings-account-heading">Account</h3>
-                <p id="account-detail">Local analysis mode.</p>
+                <p id="account-detail">Sign in to use Mark analysis.</p>
               </div>
               <div class="settings-fields settings-fields-two">
                 <div class="field">
                   <span>Credits</span>
-                  <strong id="account-credit-balance" class="account-credit-balance">Local</strong>
+                  <strong id="account-credit-balance" class="account-credit-balance">0 min</strong>
                   <small id="account-email">Not signed in</small>
                 </div>
                 <label class="field" for="credit-pack-select">
@@ -391,11 +391,11 @@
 
             <section class="settings-section" id="settings-advanced" aria-labelledby="settings-advanced-heading">
               <div class="settings-section-heading">
-                <h3 id="settings-advanced-heading">Advanced</h3>
-                <p>Local service, API readiness, and debug traces.</p>
+                <h3 id="settings-advanced-heading">Diagnostics</h3>
+                <p>Connection health and debug traces.</p>
               </div>
               <div class="settings-fields settings-fields-two">
-                <label class="field" for="helper-url">
+                <label class="field hidden" for="helper-url">
                   <span>Helper URL</span>
                   <input id="helper-url" value="http://localhost:4500" spellcheck="false">
                 </label>
@@ -406,12 +406,12 @@
                     <div class="status-list" aria-live="polite">
                       <div class="status-line">
                         <span id="helper-status-dot" class="status-dot" data-status="idle"></span>
-                        <span>Helper</span>
+                        <span>Bridge</span>
                         <strong id="connection-status" class="sr-only">Not checked</strong>
                       </div>
                       <div class="status-line">
                         <span id="api-key-status-dot" class="status-dot" data-status="idle"></span>
-                        <span>API key</span>
+                        <span>Cloud</span>
                         <strong id="api-key-status" class="sr-only">Unknown</strong>
                       </div>
                     </div>

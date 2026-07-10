@@ -354,9 +354,9 @@ cat > "build-temp/welcome.html" <<'HTML'
 </head>
 <body>
   <h1>Mark for Avid Media Composer</h1>
-  <p>This installer adds the Mark AVPI panel and the local Mark helper service.</p>
+  <p>This installer adds the Mark AVPI panel and the Mark helper service.</p>
   <div class="box">
-    <p>The helper needs Node.js and <code>TWELVELABS_API_KEY</code> in <code>~/.mark-helper.env</code> before real analysis jobs can run.</p>
+    <p>Sign in to Mark from the panel to buy credits and run hosted analysis.</p>
     <p>The panel appears under the Media Composer Tools menu after Media Composer is restarted.</p>
   </div>
 </body>

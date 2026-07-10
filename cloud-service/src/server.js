@@ -37,46 +37,198 @@ function htmlPage(title, body) {
     <style>
       :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111214; color: #e6e8eb; }
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111214; }
-      main { width: min(420px, calc(100vw - 32px)); display: grid; gap: 16px; }
+      main { width: min(440px, calc(100vw - 32px)); display: grid; gap: 16px; }
       h1 { margin: 0; font-size: 24px; line-height: 1.25; }
-      p { margin: 0; color: #9a9fa8; line-height: 1.45; }
+      h2 { margin: 0; font-size: 16px; line-height: 1.3; }
+      p { margin: 0; color: #a0a5ae; line-height: 1.45; }
+      a { color: #9bbce2; }
       form, .panel { display: grid; gap: 12px; padding: 16px; border: 1px solid #303236; border-radius: 6px; background: #1a1b1e; }
+      label { display: grid; gap: 6px; color: #c8ccd3; font-size: 13px; }
       input { min-height: 38px; border: 1px solid #303236; border-radius: 6px; padding: 0 10px; color: #e6e8eb; background: #111214; }
       button { min-height: 38px; border: 1px solid #7fa8d8; border-radius: 6px; padding: 0 14px; color: #111214; background: #9bbce2; font-weight: 650; }
-      small { color: #70757d; }
+      button.secondary { color: #d6dae0; background: transparent; border-color: #3b3e44; }
+      button.link { min-height: 0; padding: 0; color: #9bbce2; background: transparent; border: 0; font: inherit; text-align: left; }
+      small { color: #7d838c; line-height: 1.4; }
+      .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .tabs button[aria-pressed="true"] { color: #111214; background: #9bbce2; border-color: #9bbce2; }
+      .hidden { display: none !important; }
+      .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .stack { display: grid; gap: 12px; }
+      .message[data-tone="error"] { color: #ff9a94; }
+      .message[data-tone="success"] { color: #9ed7b6; }
     </style>
   </head>
   <body>${body}</body>
 </html>`;
 }
 
-function devicePage(config) {
+function authPage(config) {
   const body = `<main>
   <h1>Sign in to Mark</h1>
-  <p>Enter your email, then open the magic link from this browser. Mark will finish signing in automatically.</p>
-  <form id="sign-in-form">
-    <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required>
-    <button type="submit">Send magic link</button>
-    <small id="message"></small>
+  <p>Use your Mark account to buy credits and run hosted analysis from Avid or Premiere.</p>
+  <div class="tabs" role="group" aria-label="Auth mode">
+    <button id="tab-sign-in" class="secondary" type="button" aria-pressed="true">Sign in</button>
+    <button id="tab-sign-up" class="secondary" type="button" aria-pressed="false">Create account</button>
+  </div>
+  <form id="sign-in-form" class="stack">
+    <h2>Welcome back</h2>
+    <label>Email
+      <input id="sign-in-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+    </label>
+    <label>Password
+      <input id="sign-in-password" type="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Sign in</button>
+    <button id="forgot-password-button" class="link" type="button">Forgot password?</button>
+    <small id="sign-in-message" class="message"></small>
+  </form>
+  <form id="sign-up-form" class="stack hidden">
+    <h2>Create your account</h2>
+    <label>Email
+      <input id="sign-up-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+    </label>
+    <label>Password
+      <input id="sign-up-password" type="password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <button type="submit">Create account</button>
+    <small id="sign-up-message" class="message"></small>
+  </form>
+  <form id="forgot-password-form" class="stack hidden">
+    <h2>Reset password</h2>
+    <p>Enter your email and Mark will send you a reset link.</p>
+    <label>Email
+      <input id="reset-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+    </label>
+    <div class="actions">
+      <button id="back-to-sign-in-button" class="secondary" type="button">Back</button>
+      <button type="submit">Send reset link</button>
+    </div>
+    <small id="reset-message" class="message"></small>
   </form>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.0"></script>
 <script>
 const deviceCode = new URLSearchParams(location.search).get("device_code") || "";
-const message = document.getElementById("message");
-const client = window.supabase.createClient(${JSON.stringify(config.supabaseUrl)}, ${JSON.stringify(config.supabasePublishableKey)});
+const pendingDeviceCodeKey = "mark.pendingDeviceCode";
+const pendingRecoveryKey = "mark.pendingPasswordRecovery";
+const callbackUrl = ${JSON.stringify(config.appUrl)} + "/auth/callback";
+const client = window.supabase.createClient(${JSON.stringify(config.supabaseUrl)}, ${JSON.stringify(config.supabasePublishableKey)}, {
+  auth: {
+    detectSessionInUrl: true,
+    persistSession: true
+  }
+});
+if (deviceCode) {
+  window.localStorage.setItem(pendingDeviceCodeKey, deviceCode);
+}
+function setMessage(id, text, tone) {
+  const element = document.getElementById(id);
+  element.textContent = text || "";
+  element.dataset.tone = tone || "";
+}
+function setMode(mode) {
+  document.getElementById("sign-in-form").classList.toggle("hidden", mode !== "sign-in");
+  document.getElementById("sign-up-form").classList.toggle("hidden", mode !== "sign-up");
+  document.getElementById("forgot-password-form").classList.toggle("hidden", mode !== "forgot");
+  document.getElementById("tab-sign-in").setAttribute("aria-pressed", mode === "sign-in" ? "true" : "false");
+  document.getElementById("tab-sign-up").setAttribute("aria-pressed", mode === "sign-up" ? "true" : "false");
+}
+async function completeDevice(session, messageId) {
+  const savedDeviceCode = window.localStorage.getItem(pendingDeviceCodeKey) || deviceCode;
+  if (!session || !session.access_token) {
+    throw new Error("Supabase did not return a browser session.");
+  }
+  if (!savedDeviceCode) {
+    setMessage(messageId, "You are signed in. Return to Mark and choose Sign in again to connect this computer.", "success");
+    return;
+  }
+  const response = await fetch("/auth/device/complete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + session.access_token
+    },
+    body: JSON.stringify({
+      deviceCode: savedDeviceCode
+    })
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error && payload.error.message || "Could not connect Mark.");
+  }
+  window.localStorage.removeItem(pendingDeviceCodeKey);
+  setMessage(messageId, "Mark is signed in. You can return to the panel.", "success");
+}
+document.getElementById("tab-sign-in").addEventListener("click", function() {
+  setMode("sign-in");
+});
+document.getElementById("tab-sign-up").addEventListener("click", function() {
+  setMode("sign-up");
+});
+document.getElementById("forgot-password-button").addEventListener("click", function() {
+  const email = document.getElementById("sign-in-email").value.trim();
+  if (email) {
+    document.getElementById("reset-email").value = email;
+  }
+  setMode("forgot");
+});
+document.getElementById("back-to-sign-in-button").addEventListener("click", function() {
+  setMode("sign-in");
+});
 document.getElementById("sign-in-form").addEventListener("submit", async function(event) {
   event.preventDefault();
-  message.textContent = "Sending...";
-  const email = document.getElementById("email").value.trim();
-  const redirectTo = ${JSON.stringify(config.appUrl)} + "/auth/callback?device_code=" + encodeURIComponent(deviceCode);
-  const result = await client.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: redirectTo
+  setMessage("sign-in-message", "Signing in...");
+  try {
+    const result = await client.auth.signInWithPassword({
+      email: document.getElementById("sign-in-email").value.trim(),
+      password: document.getElementById("sign-in-password").value
+    });
+    if (result.error) {
+      throw result.error;
     }
-  });
-  message.textContent = result.error ? result.error.message : "Check your email for the Mark sign-in link.";
+    await completeDevice(result.data && result.data.session, "sign-in-message");
+  } catch (error) {
+    setMessage("sign-in-message", error.message || "Could not sign in.", "error");
+  }
+});
+document.getElementById("sign-up-form").addEventListener("submit", async function(event) {
+  event.preventDefault();
+  setMessage("sign-up-message", "Creating account...");
+  try {
+    const result = await client.auth.signUp({
+      email: document.getElementById("sign-up-email").value.trim(),
+      password: document.getElementById("sign-up-password").value,
+      options: {
+        emailRedirectTo: callbackUrl
+      }
+    });
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.data && result.data.session) {
+      await completeDevice(result.data.session, "sign-up-message");
+      return;
+    }
+    setMessage("sign-up-message", "Check your email to confirm your Mark account.", "success");
+  } catch (error) {
+    setMessage("sign-up-message", error.message || "Could not create account.", "error");
+  }
+});
+document.getElementById("forgot-password-form").addEventListener("submit", async function(event) {
+  event.preventDefault();
+  setMessage("reset-message", "Sending reset link...");
+  try {
+    window.localStorage.setItem(pendingRecoveryKey, "1");
+    const result = await client.auth.resetPasswordForEmail(document.getElementById("reset-email").value.trim(), {
+      redirectTo: callbackUrl
+    });
+    if (result.error) {
+      throw result.error;
+    }
+    setMessage("reset-message", "Check your email for a password reset link.", "success");
+  } catch (error) {
+    setMessage("reset-message", error.message || "Could not send reset link.", "error");
+  }
 });
 </script>`;
   return htmlPage("Sign in to Mark", body);
@@ -84,20 +236,58 @@ document.getElementById("sign-in-form").addEventListener("submit", async functio
 
 function callbackPage(config) {
   const body = `<main>
-  <h1>Completing Mark sign-in</h1>
-  <div class="panel"><p id="message">Checking your browser session...</p></div>
+  <h1 id="heading">Completing Mark sign-in</h1>
+  <div id="status-panel" class="panel"><p id="message">Checking your browser session...</p></div>
+  <form id="password-form" class="stack hidden">
+    <h2>Choose a new password</h2>
+    <label>New password
+      <input id="new-password" type="password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <label>Confirm password
+      <input id="confirm-password" type="password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <button type="submit">Update password</button>
+    <small id="password-message" class="message"></small>
+  </form>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.0"></script>
 <script>
-const params = new URLSearchParams(location.search);
-const deviceCode = params.get("device_code") || "";
+const query = new URLSearchParams(location.search);
+const fragment = new URLSearchParams(location.hash.slice(1));
+const pendingDeviceCodeKey = "mark.pendingDeviceCode";
+const pendingRecoveryKey = "mark.pendingPasswordRecovery";
 const message = document.getElementById("message");
-const client = window.supabase.createClient(${JSON.stringify(config.supabaseUrl)}, ${JSON.stringify(config.supabasePublishableKey)});
-(async function complete() {
+const client = window.supabase.createClient(${JSON.stringify(config.supabaseUrl)}, ${JSON.stringify(config.supabasePublishableKey)}, {
+  auth: {
+    detectSessionInUrl: true,
+    persistSession: true
+  }
+});
+function setMessage(element, text, tone) {
+  element.textContent = text || "";
+  element.dataset.tone = tone || "";
+}
+async function readSession() {
+  const code = query.get("code");
+  if (code) {
+    const exchanged = await client.auth.exchangeCodeForSession(code);
+    if (exchanged.error) {
+      throw exchanged.error;
+    }
+  }
   const result = await client.auth.getSession();
-  const session = result.data && result.data.session;
+  if (result.error) {
+    throw result.error;
+  }
+  return result.data && result.data.session;
+}
+async function completeDevice(session) {
+  const deviceCode = query.get("device_code") || window.localStorage.getItem(pendingDeviceCodeKey) || "";
   if (!session || !session.access_token) {
-    message.textContent = result.error ? result.error.message : "No Supabase session was found. Request a new Mark sign-in link.";
+    throw new Error("No Supabase session was found. Request a new Mark sign-in.");
+  }
+  if (!deviceCode) {
+    setMessage(message, "Your Mark account is ready. Return to Mark and choose Sign in again to connect this computer.", "success");
     return;
   }
   const response = await fetch("/auth/device/complete", {
@@ -109,7 +299,58 @@ const client = window.supabase.createClient(${JSON.stringify(config.supabaseUrl)
     body: JSON.stringify({ deviceCode })
   });
   const payload = await response.json();
-  message.textContent = response.ok ? "Mark is signed in. You can return to the panel." : (payload.error && payload.error.message || "Could not complete sign-in.");
+  if (!response.ok) {
+    throw new Error(payload.error && payload.error.message || "Could not complete sign-in.");
+  }
+  window.localStorage.removeItem(pendingDeviceCodeKey);
+  setMessage(message, "Mark is signed in. You can return to the panel.", "success");
+}
+function showPasswordReset(session) {
+  document.getElementById("heading").textContent = "Reset your Mark password";
+  document.getElementById("status-panel").classList.add("hidden");
+  document.getElementById("password-form").classList.remove("hidden");
+  document.getElementById("password-form").addEventListener("submit", async function(event) {
+    event.preventDefault();
+    const password = document.getElementById("new-password").value;
+    const confirmPassword = document.getElementById("confirm-password").value;
+    const passwordMessage = document.getElementById("password-message");
+    if (password !== confirmPassword) {
+      setMessage(passwordMessage, "Passwords do not match.", "error");
+      return;
+    }
+    setMessage(passwordMessage, "Updating password...");
+    try {
+      const updated = await client.auth.updateUser({
+        password
+      });
+      if (updated.error) {
+        throw updated.error;
+      }
+      window.localStorage.removeItem(pendingRecoveryKey);
+      document.getElementById("password-form").classList.add("hidden");
+      document.getElementById("status-panel").classList.remove("hidden");
+      document.getElementById("heading").textContent = "Password updated";
+      await completeDevice(await readSession() || session);
+    } catch (error) {
+      setMessage(passwordMessage, error.message || "Could not update password.", "error");
+    }
+  });
+}
+(async function complete() {
+  try {
+    if (fragment.get("error") || query.get("error")) {
+      throw new Error(fragment.get("error_description") || query.get("error_description") || "The auth link could not be used.");
+    }
+    const session = await readSession();
+    const isRecovery = fragment.get("type") === "recovery" || query.get("type") === "recovery" || window.localStorage.getItem(pendingRecoveryKey) === "1";
+    if (isRecovery) {
+      showPasswordReset(session);
+      return;
+    }
+    await completeDevice(session);
+  } catch (error) {
+    setMessage(message, error.message || "Could not complete sign-in.", "error");
+  }
 })();
 </script>`;
   return htmlPage("Mark Sign-in Complete", body);
@@ -173,7 +414,7 @@ function createApp(options = {}) {
   });
 
   app.get("/auth/device", function authDevicePage(req, res) {
-    res.type("html").send(devicePage(config));
+    res.type("html").send(authPage(config));
   });
 
   app.get("/auth/callback", function authCallbackPage(req, res) {

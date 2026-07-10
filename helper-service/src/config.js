@@ -13,6 +13,7 @@ const DEFAULT_MEDIA_CHUNK_OVERLAP_SECONDS = 2;
 const DEFAULT_THUMBNAIL_WIDTH = 160;
 const DEFAULT_THUMBNAIL_MAX_PER_JOB = 50;
 const DEFAULT_THUMBNAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MARK_CLOUD_URL = "https://mark-cloud-api.onrender.com";
 
 function loadDotEnv(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -93,8 +94,8 @@ const config = {
   port: intFromEnv("MARK_HELPER_PORT", 4500),
   twelveLabsApiKey: process.env.TWELVELABS_API_KEY || "",
   twelveLabsBaseUrl: process.env.TWELVELABS_API_BASE_URL || "https://api.twelvelabs.io/v1.3",
-  markCloudUrl: stringFromEnv("MARK_CLOUD_URL", ""),
-  markCloudAnalysisEnabled: boolFromEnv("MARK_CLOUD_ANALYSIS_ENABLED", Boolean(process.env.MARK_CLOUD_URL)),
+  markCloudUrl: stringFromEnv("MARK_CLOUD_URL", DEFAULT_MARK_CLOUD_URL),
+  markCloudAnalysisEnabled: boolFromEnv("MARK_CLOUD_ANALYSIS_ENABLED", true),
   markSessionPath: stringFromEnv("MARK_SESSION_PATH", defaultSessionPath()),
   openBrowserForAuth: boolFromEnv("MARK_OPEN_BROWSER", process.env.NODE_ENV !== "test"),
   exportSettingsName: process.env.MARK_EXPORT_SETTING || "Mark 12Labs Proxy",

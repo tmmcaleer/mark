@@ -570,7 +570,7 @@ function accountRequiresSignIn() {
 
 function accountCreditText(account) {
   if (!state.helperConfig || !state.helperConfig.cloudAnalysisEnabled) {
-    return "Local";
+    return "Unavailable";
   }
   const minutes = account && account.credits ? Number(account.credits.balanceMinutes) : 0;
   return `${Number.isFinite(minutes) ? minutes : 0} min`;
@@ -593,7 +593,7 @@ function renderAccount() {
       ? authenticated
         ? accountCreditText(account)
         : "Sign in"
-      : "Local";
+      : "Unavailable";
   }
   if (dom["account-button"]) {
     dom["account-button"].disabled = !cloudEnabled;
@@ -601,7 +601,7 @@ function renderAccount() {
       ? authenticated
         ? "Mark account"
         : "Sign in to Mark"
-      : "Local analysis";
+      : "Mark account service unavailable";
   }
   if (dom["buy-credits-button"]) {
     dom["buy-credits-button"].classList.toggle("hidden", !authenticated);
@@ -611,8 +611,8 @@ function renderAccount() {
     dom["account-detail"].textContent = cloudEnabled
       ? authenticated
         ? "Signed in for hosted analysis."
-        : "Sign in to use hosted analysis."
-      : "Local analysis mode.";
+        : "Sign in or create an account to use Mark analysis."
+      : "Mark account service unavailable.";
   }
   if (dom["account-credit-balance"]) {
     dom["account-credit-balance"].textContent = accountCreditText(account);
@@ -2860,22 +2860,21 @@ function checkHelper(options) {
       maxConcurrentJobs: config.maxConcurrentJobs,
       proxyRoots: config.proxyRoots,
       proxyExtensions: config.proxyExtensions,
-      hasTwelveLabsApiKey: config.hasTwelveLabsApiKey
+      cloudAnalysisEnabled: config.cloudAnalysisEnabled
     });
     dom["connection-status"].textContent = "Online";
     dom["helper-status-dot"].dataset.status = "ready";
     dom["api-key-status"].textContent = config.cloudAnalysisEnabled
-      ? "Cloud"
-      : config.hasTwelveLabsApiKey ? "Ready" : "Missing";
-    dom["api-key-status-dot"].dataset.status = (config.cloudAnalysisEnabled || config.hasTwelveLabsApiKey) ? "ready" : "warning";
+      ? "Ready"
+      : "Unavailable";
+    dom["api-key-status-dot"].dataset.status = config.cloudAnalysisEnabled ? "ready" : "warning";
     if (state.exportSettingsLoaded) {
       renderExportSettings(state.exportSettings, config);
     }
     updateProxyRepositorySummary();
     refreshAccount({ silent: true }).catch(function noop() {});
     if (!silent) {
-      const analysisReady = config.cloudAnalysisEnabled || config.hasTwelveLabsApiKey;
-      setStatus(analysisReady ? "Helper connected." : "Helper connected, but TWELVELABS_API_KEY is missing.", !analysisReady);
+      setStatus(config.cloudAnalysisEnabled ? "Mark bridge connected." : "Mark account service unavailable.", !config.cloudAnalysisEnabled);
     }
     return config;
   }).catch(function failed(error) {
@@ -2921,7 +2920,7 @@ function clearAuthPoll() {
 
 function startSignIn() {
   if (!state.helperConfig || !state.helperConfig.cloudAnalysisEnabled) {
-    setStatus("Hosted Mark analysis is not configured.", true);
+    setStatus("Mark account service unavailable.", true);
     return;
   }
   clearAuthPoll();
@@ -2929,7 +2928,7 @@ function startSignIn() {
     clientName: "Mark Avid Panel"
   }).then(function started(payload) {
     state.authDeviceCode = payload.deviceCode || "";
-    setStatus("Check your browser to finish signing in.");
+    setStatus("Use your browser to sign in, create an account, or reset your password.");
     pollSignIn();
   }).catch(function failed(error) {
     setStatus(error.message, true);
@@ -3152,8 +3151,11 @@ function startAnalyze() {
 
   checkHelper()
     .then(function helperReady(config) {
-      if (!config.hasTwelveLabsApiKey) {
-        throw new Error("TWELVELABS_API_KEY is not set in the helper service.");
+      if (!config.cloudAnalysisEnabled) {
+        throw new Error("Mark account service unavailable.");
+      }
+      if (accountRequiresSignIn()) {
+        throw new Error("Sign in to Mark before analyzing media.");
       }
       return ensureExportSetting(config);
     })
