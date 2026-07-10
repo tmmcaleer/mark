@@ -11,7 +11,7 @@ log_message() {
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESOURCES_DIR="$(cd "$SCRIPT_DIR/../Resources" && pwd)"
-ENV_FILE="$RESOURCES_DIR/.env"
+ENV_FILE="$HOME/.mark-helper.env"
 
 if [ -f "$ENV_FILE" ]; then
   log_message "Loading environment from $ENV_FILE"
@@ -20,7 +20,7 @@ if [ -f "$ENV_FILE" ]; then
   . "$ENV_FILE"
   set +a
 else
-  log_message "No bundled $ENV_FILE found; TWELVELABS_API_KEY may be missing"
+  log_message "No $ENV_FILE found; TWELVELABS_API_KEY may be missing"
 fi
 
 cd "$RESOURCES_DIR"

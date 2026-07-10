@@ -1,6 +1,6 @@
 {
   "name": "mark-avid-panel",
-  "version": "0.1.0",
+  "version": "3.1.0",
   "description": "Avid Media Composer panel for TwelveLabs-powered marker generation",
   "private": true,
   "scripts": {

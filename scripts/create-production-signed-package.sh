@@ -174,6 +174,8 @@ chmod +x "$MACOS_DIR/mark-helper"
 rsync -a \
   --exclude node_modules \
   --exclude test \
+  --exclude '.env' \
+  --exclude '*.env' \
   --exclude '*.log' \
   "$REPO_ROOT/helper-service/" "$RESOURCES_DIR/"
 
@@ -185,8 +187,10 @@ cd "$REPO_ROOT"
 if [ "$SKIP_SIGN" -eq 0 ]; then
   log "Signing helper app bundle"
   if [ -d "$RESOURCES_DIR/node_modules" ]; then
-    find "$RESOURCES_DIR/node_modules" -name '*.node' -type f -print0 | while IFS= read -r -d '' binary; do
-      codesign --force --options runtime --timestamp --sign "$APP_SIGN_IDENTITY" "$binary" || true
+    find "$RESOURCES_DIR/node_modules" -type f \( -name '*.node' -o -perm -111 \) -print0 | while IFS= read -r -d '' binary; do
+      if file "$binary" | grep -q 'Mach-O'; then
+        codesign --force --options runtime --timestamp --sign "$APP_SIGN_IDENTITY" "$binary"
+      fi
     done
   fi
   codesign --force --deep --options runtime --timestamp --sign "$APP_SIGN_IDENTITY" "$APP_BUNDLE"
@@ -238,6 +242,7 @@ USER_HOME="$(eval echo "~$CONSOLE_USER")"
 USER_ID="$(id -u "$CONSOLE_USER")"
 LAUNCH_AGENT_DIR="$USER_HOME/Library/LaunchAgents"
 PLIST_FILE="$LAUNCH_AGENT_DIR/$LABEL.plist"
+ENV_FILE="$USER_HOME/.mark-helper.env"
 LOG_DIR="$USER_HOME/.mark-logs"
 
 mkdir -p "$LAUNCH_AGENT_DIR" "$LOG_DIR"
@@ -272,9 +277,12 @@ cat > "$PLIST_FILE" <<PLIST
 </plist>
 PLIST
 
-chown "$CONSOLE_USER:staff" "$PLIST_FILE" "$ENV_FILE"
+chown "$CONSOLE_USER:staff" "$PLIST_FILE"
 chmod 644 "$PLIST_FILE"
-chmod 600 "$ENV_FILE"
+if [ -f "$ENV_FILE" ]; then
+  chown "$CONSOLE_USER:staff" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+fi
 chown -R "$CONSOLE_USER:staff" "$LOG_DIR"
 
 launchctl bootout "gui/$USER_ID/$LABEL" 2>/dev/null || true
@@ -348,7 +356,7 @@ cat > "build-temp/welcome.html" <<'HTML'
   <h1>Mark for Avid Media Composer</h1>
   <p>This installer adds the Mark AVPI panel and the local Mark helper service.</p>
   <div class="box">
-    <p>The helper needs Node.js and a bundled helper <code>.env</code> file containing <code>TWELVELABS_API_KEY</code> before real analysis jobs can run.</p>
+    <p>The helper needs Node.js and <code>TWELVELABS_API_KEY</code> in <code>~/.mark-helper.env</code> before real analysis jobs can run.</p>
     <p>The panel appears under the Media Composer Tools menu after Media Composer is restarted.</p>
   </div>
 </body>
