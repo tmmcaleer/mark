@@ -259,6 +259,12 @@ test("hosted auth and billing pages expose account flow copy", async function ()
     assert.match(authHtml, /Buy credits/);
     assert.match(authHtml, /browser\/billing\/checkout-sessions/);
 
+    const home = await fetch(`http://127.0.0.1:${port}/`);
+    assert.equal(home.status, 200);
+    const homeHtml = await home.text();
+    assert.match(homeHtml, /Avid Media Composer/);
+    assert.match(homeHtml, /analyzed-minute credit packs/);
+
     const success = await fetch(`http://127.0.0.1:${port}/billing/success`);
     assert.equal(success.status, 200);
     assert.match(await success.text(), /Payment received/);

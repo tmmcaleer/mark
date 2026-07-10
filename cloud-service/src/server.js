@@ -571,6 +571,22 @@ function billingResultPage(options) {
   return htmlPage(title, body);
 }
 
+function publicHomePage() {
+  const body = `<main>
+  <h1>Mark</h1>
+  <p>Mark is a desktop panel for Avid Media Composer and Adobe Premiere Pro that uses hosted AI analysis to propose timeline markers and subclips from editor-selected media.</p>
+  <section class="panel">
+    <h2>Credit packs</h2>
+    <p>Mark sells one-time analyzed-minute credit packs. Credits are used when Mark uploads prepared media segments for hosted analysis and returns reviewed marker or subclip proposals to the editor's timeline.</p>
+    <div class="actions">
+      <a class="button-link" href="/auth/device">Sign in</a>
+      <a class="button-link secondary" href="https://github.com/tmmcaleer/mark">Product details</a>
+    </div>
+  </section>
+</main>`;
+  return htmlPage("Mark", body);
+}
+
 function createApp(options = {}) {
   const config = options.config || defaultConfig;
   fs.mkdirSync(config.uploadDir, {
@@ -619,6 +635,10 @@ function createApp(options = {}) {
   app.use(express.json({
     limit: "1mb"
   }));
+
+  app.get("/", function home(req, res) {
+    res.type("html").send(publicHomePage());
+  });
 
   app.get("/health", function health(req, res) {
     res.json({
