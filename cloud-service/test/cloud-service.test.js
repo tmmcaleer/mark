@@ -152,6 +152,121 @@ test("checkout sessions use server-side pack price ids", async function () {
   assert.equal(calls[0].metadata.creditMinutes, "60");
 });
 
+test("browser account dashboard endpoints use Supabase sessions", async function () {
+  const calls = [];
+  const store = new MemoryStore();
+  await store.grantCreditPack({
+    userId: "00000000-0000-4000-8000-000000000001",
+    email: "editor@example.com",
+    minutes: 15,
+    packId: "seed",
+    stripeEventId: "evt_seed",
+    checkoutSessionId: "cs_seed"
+  });
+  const stripe = {
+    checkout: {
+      sessions: {
+        create: async function create(payload) {
+          calls.push(payload);
+          return {
+            id: "cs_browser",
+            url: "https://checkout.stripe.test/browser",
+            customer: "cus_browser"
+          };
+        }
+      }
+    }
+  };
+  const { app } = createApp({
+    config: config(),
+    store,
+    supabaseAuth: {
+      auth: {
+        getUser: async function getUser(token) {
+          assert.equal(token, "supabase-browser-token");
+          return {
+            data: {
+              user: {
+                id: "00000000-0000-4000-8000-000000000001",
+                email: "editor@example.com"
+              }
+            },
+            error: null
+          };
+        }
+      }
+    },
+    analyzer: {
+      analyzeFile: async function analyzeFile() {
+        return {};
+      }
+    },
+    stripe
+  });
+  const server = await listen(app);
+  const port = server.address().port;
+
+  try {
+    const account = await fetch(`http://127.0.0.1:${port}/browser/account`, {
+      headers: {
+        Authorization: "Bearer supabase-browser-token"
+      }
+    });
+    assert.equal(account.status, 200);
+    const accountBody = await account.json();
+    assert.equal(accountBody.credits.balanceMinutes, 15);
+    assert.equal(accountBody.creditPacks[0].id, "starter");
+
+    const checkout = await fetch(`http://127.0.0.1:${port}/browser/billing/checkout-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer supabase-browser-token"
+      },
+      body: JSON.stringify({
+        packId: "starter"
+      })
+    });
+    assert.equal(checkout.status, 201);
+    const checkoutBody = await checkout.json();
+    assert.equal(checkoutBody.url, "https://checkout.stripe.test/browser");
+    assert.equal(calls[0].success_url, "http://localhost:4510/billing/success");
+    assert.equal(calls[0].cancel_url, "http://localhost:4510/billing/cancel");
+  } finally {
+    await close(server);
+  }
+});
+
+test("hosted auth and billing pages expose account flow copy", async function () {
+  const { app } = createApp({
+    config: config(),
+    store: new MemoryStore(),
+    analyzer: {
+      analyzeFile: async function analyzeFile() {
+        return {};
+      }
+    },
+    stripe: null
+  });
+  const server = await listen(app);
+  const port = server.address().port;
+
+  try {
+    const auth = await fetch(`http://127.0.0.1:${port}/auth/device?device_code=abc`);
+    assert.equal(auth.status, 200);
+    const authHtml = await auth.text();
+    assert.match(authHtml, /Mark account/);
+    assert.match(authHtml, /Buy credits/);
+    assert.match(authHtml, /browser\/billing\/checkout-sessions/);
+
+    const success = await fetch(`http://127.0.0.1:${port}/billing/success`);
+    assert.equal(success.status, 200);
+    assert.match(await success.text(), /Payment received/);
+  } finally {
+    await close(server);
+  }
+});
+
 test("stripe fulfillment is idempotent", async function () {
   const store = new MemoryStore();
   const deps = {

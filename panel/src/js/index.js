@@ -196,6 +196,9 @@ const state = {
   previousViewMode: "drop",
   isBusy: false,
   isApplying: false,
+  isSigningIn: false,
+  isSigningOut: false,
+  isBuyingCredits: false,
   account: null,
   authDeviceCode: ""
 };
@@ -269,6 +272,7 @@ function initDom() {
     "account-email",
     "credit-pack-select",
     "sign-in-button",
+    "refresh-account-button",
     "sign-out-button",
     "settings-buy-credits-button",
     "export-setting-select",
@@ -332,6 +336,18 @@ function showToast(message, kind) {
       dom["toast"].classList.add("hidden");
     }
   }, 2600);
+}
+
+function tryOpenReturnedUrl(url) {
+  if (!url || typeof window.open !== "function") {
+    return false;
+  }
+  try {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    return Boolean(opened);
+  } catch (error) {
+    return false;
+  }
 }
 
 function debugJson(value) {
@@ -587,16 +603,23 @@ function renderAccount() {
   };
   const authenticated = cloudEnabled && account.authenticated;
   const creditPacks = Array.isArray(account.creditPacks) ? account.creditPacks : [];
+  const accountActionBusy = state.isSigningIn || state.isSigningOut || state.isBuyingCredits;
 
   if (dom["account-summary"]) {
     dom["account-summary"].textContent = cloudEnabled
-      ? authenticated
+      ? state.isSigningIn
+        ? "Signing in..."
+        : state.isBuyingCredits
+          ? "Checkout..."
+          : authenticated
         ? accountCreditText(account)
         : "Sign in"
       : "Unavailable";
   }
   if (dom["account-button"]) {
-    dom["account-button"].disabled = !cloudEnabled;
+    dom["account-button"].disabled = !cloudEnabled || state.isSigningIn || state.isSigningOut;
+    dom["account-button"].classList.toggle("is-authenticated", authenticated);
+    dom["account-button"].classList.toggle("is-working", accountActionBusy);
     dom["account-button"].title = cloudEnabled
       ? authenticated
         ? "Mark account"
@@ -604,12 +627,17 @@ function renderAccount() {
       : "Mark account service unavailable";
   }
   if (dom["buy-credits-button"]) {
+    dom["buy-credits-button"].textContent = state.isBuyingCredits ? "Opening..." : "Buy credits";
     dom["buy-credits-button"].classList.toggle("hidden", !authenticated);
-    dom["buy-credits-button"].disabled = !authenticated || creditPacks.length === 0;
+    dom["buy-credits-button"].disabled = !authenticated || creditPacks.length === 0 || accountActionBusy;
   }
   if (dom["account-detail"]) {
     dom["account-detail"].textContent = cloudEnabled
-      ? authenticated
+      ? state.isSigningIn
+        ? "Finish sign-in in your browser. Mark will update automatically."
+        : state.isBuyingCredits
+          ? "Secure checkout is opening in your browser."
+          : authenticated
         ? "Signed in for hosted analysis."
         : "Sign in or create an account to use Mark analysis."
       : "Mark account service unavailable.";
@@ -640,13 +668,19 @@ function renderAccount() {
     dom["credit-pack-select"].disabled = !authenticated || creditPacks.length === 0;
   }
   if (dom["sign-in-button"]) {
-    dom["sign-in-button"].disabled = !cloudEnabled || authenticated || state.isBusy;
+    dom["sign-in-button"].textContent = state.isSigningIn ? "Waiting for browser..." : "Sign in";
+    dom["sign-in-button"].disabled = !cloudEnabled || authenticated || state.isBusy || accountActionBusy;
+  }
+  if (dom["refresh-account-button"]) {
+    dom["refresh-account-button"].disabled = !cloudEnabled || state.isBusy || accountActionBusy;
   }
   if (dom["sign-out-button"]) {
-    dom["sign-out-button"].disabled = !authenticated || state.isBusy;
+    dom["sign-out-button"].textContent = state.isSigningOut ? "Signing out..." : "Sign out";
+    dom["sign-out-button"].disabled = !authenticated || state.isBusy || accountActionBusy;
   }
   if (dom["settings-buy-credits-button"]) {
-    dom["settings-buy-credits-button"].disabled = !authenticated || creditPacks.length === 0 || state.isBusy;
+    dom["settings-buy-credits-button"].textContent = state.isBuyingCredits ? "Opening checkout..." : "Buy credits";
+    dom["settings-buy-credits-button"].disabled = !authenticated || creditPacks.length === 0 || state.isBusy || accountActionBusy;
   }
   setBusy(state.isBusy);
 }
@@ -2923,14 +2957,29 @@ function startSignIn() {
     setStatus("Mark account service unavailable.", true);
     return;
   }
+  if (state.isSigningIn) {
+    setStatus("Finish sign-in in the browser. Mark will update here automatically.");
+    return;
+  }
   clearAuthPoll();
+  state.isSigningIn = true;
+  renderAccount();
+  setStatus("Opening Mark sign-in in your browser...");
   requestJson("POST", "/auth/device/start", {
     clientName: "Mark Avid Panel"
   }).then(function started(payload) {
     state.authDeviceCode = payload.deviceCode || "";
-    setStatus("Use your browser to sign in, create an account, or reset your password.");
+    if (!state.authDeviceCode) {
+      throw new Error("Mark did not start a sign-in session.");
+    }
+    if (payload.openedInBrowser === false && payload.verificationUri) {
+      tryOpenReturnedUrl(payload.verificationUri);
+    }
+    setStatus("Finish sign-in in the browser. Mark will update here automatically.");
     pollSignIn();
   }).catch(function failed(error) {
+    state.isSigningIn = false;
+    renderAccount();
     setStatus(error.message, true);
   });
 }
@@ -2943,27 +2992,40 @@ function pollSignIn() {
     if (payload.status === "authorized") {
       clearAuthPoll();
       state.authDeviceCode = "";
+      state.isSigningIn = false;
       refreshAccount({ silent: true }).then(function refreshed() {
-        setStatus("Signed in to Mark.");
+        setStatus("Signed in to Mark. Credits and checkout are ready.");
       });
       return;
     }
     if (payload.status === "expired") {
       clearAuthPoll();
       state.authDeviceCode = "";
+      state.isSigningIn = false;
+      renderAccount();
       setStatus("Mark sign-in expired. Try again.", true);
       return;
     }
     authPollTimer = window.setTimeout(pollSignIn, 2000);
   }).catch(function failed(error) {
     clearAuthPoll();
+    state.isSigningIn = false;
+    renderAccount();
     setStatus(error.message, true);
   });
 }
 
 function signOut() {
+  if (state.isSigningOut) {
+    return;
+  }
   clearAuthPoll();
+  state.isSigningIn = false;
+  state.isSigningOut = true;
+  renderAccount();
+  setStatus("Signing out of Mark...");
   requestJson("POST", "/auth/sign-out", {}).then(function signedOut() {
+    state.isSigningOut = false;
     state.account = {
       authenticated: false,
       credits: {
@@ -2974,11 +3036,17 @@ function signOut() {
     renderAccount();
     setStatus("Signed out of Mark.");
   }).catch(function failed(error) {
+    state.isSigningOut = false;
+    renderAccount();
     setStatus(error.message, true);
   });
 }
 
 function buyCredits() {
+  if (state.isBuyingCredits) {
+    setStatus("Checkout is already opening.");
+    return;
+  }
   const packId = dom["credit-pack-select"] && dom["credit-pack-select"].value
     ? dom["credit-pack-select"].value
     : state.account && state.account.creditPacks && state.account.creditPacks[0] && state.account.creditPacks[0].id;
@@ -2986,11 +3054,21 @@ function buyCredits() {
     setStatus("No Mark credit packs are configured.", true);
     return;
   }
+  state.isBuyingCredits = true;
+  renderAccount();
+  setStatus("Opening secure checkout...");
   requestJson("POST", "/billing/checkout-sessions", {
     packId
   }).then(function checkout() {
-    setStatus("Checkout opened in your browser.");
+    state.isBuyingCredits = false;
+    renderAccount();
+    if (checkout && checkout.openedInBrowser === false && checkout.url) {
+      tryOpenReturnedUrl(checkout.url);
+    }
+    setStatus("Checkout opened. After payment, return to Mark and refresh your account.");
   }).catch(function failed(error) {
+    state.isBuyingCredits = false;
+    renderAccount();
     setStatus(error.message, true);
   });
 }
@@ -5442,6 +5520,12 @@ function registerEvents() {
     openSettings();
   });
   dom["sign-in-button"].addEventListener("click", startSignIn);
+  dom["refresh-account-button"].addEventListener("click", function onRefreshAccount() {
+    setStatus("Refreshing Mark account...");
+    refreshAccount({ silent: false }).then(function refreshed() {
+      setStatus("Mark account refreshed.");
+    }).catch(function noop() {});
+  });
   dom["sign-out-button"].addEventListener("click", signOut);
   dom["buy-credits-button"].addEventListener("click", buyCredits);
   dom["settings-buy-credits-button"].addEventListener("click", buyCredits);

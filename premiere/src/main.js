@@ -15,6 +15,9 @@
     activeJobId: "",
     isBusy: false,
     isApplying: false,
+    isSigningIn: false,
+    isSigningOut: false,
+    isBuyingCredits: false,
     lastPrompt: "",
     viewMode: "drop",
     pollTimer: null,
@@ -92,6 +95,7 @@
       "account-email",
       "credit-pack-select",
       "sign-in-button",
+      "refresh-account-button",
       "sign-out-button",
       "settings-buy-credits-button",
       "export-setting-select",
@@ -126,6 +130,18 @@
     }
     if (message && isError) {
       showToast(message, "error");
+    }
+  }
+
+  function tryOpenReturnedUrl(url) {
+    if (!url || typeof global.open !== "function") {
+      return false;
+    }
+    try {
+      const opened = global.open(url, "_blank", "noopener,noreferrer");
+      return Boolean(opened);
+    } catch (error) {
+      return false;
     }
   }
 
@@ -212,18 +228,38 @@
     };
     const authenticated = cloudEnabled && account.authenticated;
     const packs = Array.isArray(account.creditPacks) ? account.creditPacks : [];
+    const accountActionBusy = state.isSigningIn || state.isSigningOut || state.isBuyingCredits;
     if (dom["account-summary"]) {
-      dom["account-summary"].textContent = cloudEnabled ? authenticated ? accountCreditText(account) : "Sign in" : "Unavailable";
+      dom["account-summary"].textContent = cloudEnabled
+        ? state.isSigningIn
+          ? "Signing in..."
+          : state.isBuyingCredits
+            ? "Checkout..."
+            : authenticated
+              ? accountCreditText(account)
+              : "Sign in"
+        : "Unavailable";
     }
     if (dom["account-button"]) {
-      dom["account-button"].disabled = !cloudEnabled;
+      dom["account-button"].disabled = !cloudEnabled || state.isSigningIn || state.isSigningOut;
+      dom["account-button"].classList.toggle("is-authenticated", authenticated);
+      dom["account-button"].classList.toggle("is-working", accountActionBusy);
     }
     if (dom["buy-credits-button"]) {
+      dom["buy-credits-button"].textContent = state.isBuyingCredits ? "Opening..." : "Buy credits";
       dom["buy-credits-button"].classList.toggle("hidden", !authenticated);
-      dom["buy-credits-button"].disabled = !authenticated || packs.length === 0;
+      dom["buy-credits-button"].disabled = !authenticated || packs.length === 0 || accountActionBusy;
     }
     if (dom["account-detail"]) {
-      dom["account-detail"].textContent = cloudEnabled ? authenticated ? "Signed in for hosted analysis." : "Sign in or create an account to use Mark analysis." : "Mark account service unavailable.";
+      dom["account-detail"].textContent = cloudEnabled
+        ? state.isSigningIn
+          ? "Finish sign-in in your browser. Mark will update automatically."
+          : state.isBuyingCredits
+            ? "Secure checkout is opening in your browser."
+            : authenticated
+              ? "Signed in for hosted analysis."
+              : "Sign in or create an account to use Mark analysis."
+        : "Mark account service unavailable.";
     }
     if (dom["account-credit-balance"]) {
       dom["account-credit-balance"].textContent = accountCreditText(account);
@@ -249,13 +285,19 @@
       dom["credit-pack-select"].disabled = !authenticated || packs.length === 0;
     }
     if (dom["sign-in-button"]) {
-      dom["sign-in-button"].disabled = !cloudEnabled || authenticated || state.isBusy;
+      dom["sign-in-button"].textContent = state.isSigningIn ? "Waiting for browser..." : "Sign in";
+      dom["sign-in-button"].disabled = !cloudEnabled || authenticated || state.isBusy || accountActionBusy;
+    }
+    if (dom["refresh-account-button"]) {
+      dom["refresh-account-button"].disabled = !cloudEnabled || state.isBusy || accountActionBusy;
     }
     if (dom["sign-out-button"]) {
-      dom["sign-out-button"].disabled = !authenticated || state.isBusy;
+      dom["sign-out-button"].textContent = state.isSigningOut ? "Signing out..." : "Sign out";
+      dom["sign-out-button"].disabled = !authenticated || state.isBusy || accountActionBusy;
     }
     if (dom["settings-buy-credits-button"]) {
-      dom["settings-buy-credits-button"].disabled = !authenticated || packs.length === 0 || state.isBusy;
+      dom["settings-buy-credits-button"].textContent = state.isBuyingCredits ? "Opening checkout..." : "Buy credits";
+      dom["settings-buy-credits-button"].disabled = !authenticated || packs.length === 0 || state.isBusy || accountActionBusy;
     }
     setBusy(state.isBusy);
   }
@@ -656,15 +698,30 @@
       setStatus("Mark account service unavailable.", true);
       return;
     }
+    if (state.isSigningIn) {
+      setStatus("Finish sign-in in the browser. Mark will update here automatically.");
+      return;
+    }
     clearAuthPoll();
+    state.isSigningIn = true;
+    renderAccount();
+    setStatus("Opening Mark sign-in in your browser...");
     try {
       const payload = await requestJson("POST", "/auth/device/start", {
         clientName: "Mark Premiere Panel"
       });
       state.authDeviceCode = payload.deviceCode || "";
-      setStatus("Use your browser to sign in, create an account, or reset your password.");
+      if (!state.authDeviceCode) {
+        throw new Error("Mark did not start a sign-in session.");
+      }
+      if (payload.openedInBrowser === false && payload.verificationUri) {
+        tryOpenReturnedUrl(payload.verificationUri);
+      }
+      setStatus("Finish sign-in in the browser. Mark will update here automatically.");
       pollSignIn();
     } catch (error) {
+      state.isSigningIn = false;
+      renderAccount();
       setStatus(error.message || String(error), true);
     }
   }
@@ -678,27 +735,40 @@
       if (payload.status === "authorized") {
         clearAuthPoll();
         state.authDeviceCode = "";
+        state.isSigningIn = false;
         await refreshAccount({ silent: true });
-        setStatus("Signed in to Mark.");
+        setStatus("Signed in to Mark. Credits and checkout are ready.");
         return;
       }
       if (payload.status === "expired") {
         clearAuthPoll();
         state.authDeviceCode = "";
+        state.isSigningIn = false;
+        renderAccount();
         setStatus("Mark sign-in expired. Try again.", true);
         return;
       }
       authPollTimer = global.setTimeout(pollSignIn, 2000);
     } catch (error) {
       clearAuthPoll();
+      state.isSigningIn = false;
+      renderAccount();
       setStatus(error.message || String(error), true);
     }
   }
 
   async function signOut() {
+    if (state.isSigningOut) {
+      return;
+    }
     clearAuthPoll();
+    state.isSigningIn = false;
+    state.isSigningOut = true;
+    renderAccount();
+    setStatus("Signing out of Mark...");
     try {
       await requestJson("POST", "/auth/sign-out", {});
+      state.isSigningOut = false;
       state.account = {
         authenticated: false,
         credits: {
@@ -709,11 +779,17 @@
       renderAccount();
       setStatus("Signed out of Mark.");
     } catch (error) {
+      state.isSigningOut = false;
+      renderAccount();
       setStatus(error.message || String(error), true);
     }
   }
 
   async function buyCredits() {
+    if (state.isBuyingCredits) {
+      setStatus("Checkout is already opening.");
+      return;
+    }
     const packId = dom["credit-pack-select"] && dom["credit-pack-select"].value
       ? dom["credit-pack-select"].value
       : state.account && state.account.creditPacks && state.account.creditPacks[0] && state.account.creditPacks[0].id;
@@ -721,12 +797,22 @@
       setStatus("No Mark credit packs are configured.", true);
       return;
     }
+    state.isBuyingCredits = true;
+    renderAccount();
+    setStatus("Opening secure checkout...");
     try {
-      await requestJson("POST", "/billing/checkout-sessions", {
+      const checkout = await requestJson("POST", "/billing/checkout-sessions", {
         packId
       });
-      setStatus("Checkout opened in your browser.");
+      state.isBuyingCredits = false;
+      renderAccount();
+      if (checkout && checkout.openedInBrowser === false && checkout.url) {
+        tryOpenReturnedUrl(checkout.url);
+      }
+      setStatus("Checkout opened. After payment, return to Mark and refresh your account.");
     } catch (error) {
+      state.isBuyingCredits = false;
+      renderAccount();
       setStatus(error.message || String(error), true);
     }
   }
@@ -1106,6 +1192,14 @@
     }
     if (dom["sign-in-button"]) {
       dom["sign-in-button"].addEventListener("click", startSignIn);
+    }
+    if (dom["refresh-account-button"]) {
+      dom["refresh-account-button"].addEventListener("click", function refreshMarkAccount() {
+        setStatus("Refreshing Mark account...");
+        refreshAccount({ silent: false }).then(function refreshed() {
+          setStatus("Mark account refreshed.");
+        }).catch(function noop() {});
+      });
     }
     if (dom["sign-out-button"]) {
       dom["sign-out-button"].addEventListener("click", signOut);

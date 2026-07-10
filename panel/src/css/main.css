@@ -232,19 +232,45 @@ h4 {
 }
 
 .account-button {
-  min-width: 68px;
-  max-width: 112px;
+  min-width: 82px;
+  max-width: 136px;
   min-height: 34px;
-  padding: 0 10px;
+  padding: 0 12px;
   overflow: hidden;
   color: var(--muted);
   font-size: var(--type-caption);
+  font-weight: 590;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.account-button.is-authenticated {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.account-button.is-authenticated:not(:disabled):hover {
+  color: var(--accent-ink);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.account-button.is-working {
+  color: var(--color-light-steel);
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+}
+
 .account-button:not(:disabled):hover {
   color: var(--text);
+}
+
+#buy-credits-button {
+  min-width: 86px;
+  padding: 0 12px;
+  font-size: var(--type-caption);
+  font-weight: 590;
 }
 
 .account-credit-balance {

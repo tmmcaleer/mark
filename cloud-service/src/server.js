@@ -37,7 +37,7 @@ function htmlPage(title, body) {
     <style>
       :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111214; color: #e6e8eb; }
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111214; }
-      main { width: min(440px, calc(100vw - 32px)); display: grid; gap: 16px; }
+      main { width: min(560px, calc(100vw - 32px)); display: grid; gap: 16px; padding: 32px 0; }
       h1 { margin: 0; font-size: 24px; line-height: 1.25; }
       h2 { margin: 0; font-size: 16px; line-height: 1.3; }
       p { margin: 0; color: #a0a5ae; line-height: 1.45; }
@@ -48,12 +48,27 @@ function htmlPage(title, body) {
       button { min-height: 38px; border: 1px solid #7fa8d8; border-radius: 6px; padding: 0 14px; color: #111214; background: #9bbce2; font-weight: 650; }
       button.secondary { color: #d6dae0; background: transparent; border-color: #3b3e44; }
       button.link { min-height: 0; padding: 0; color: #9bbce2; background: transparent; border: 0; font: inherit; text-align: left; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      .button-link { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border: 1px solid #7fa8d8; border-radius: 6px; padding: 0 14px; color: #111214; background: #9bbce2; font-weight: 650; text-decoration: none; }
+      .button-link.secondary { color: #d6dae0; background: transparent; border-color: #3b3e44; }
       small { color: #7d838c; line-height: 1.4; }
       .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
       .tabs button[aria-pressed="true"] { color: #111214; background: #9bbce2; border-color: #9bbce2; }
       .hidden { display: none !important; }
       .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
       .stack { display: grid; gap: 12px; }
+      .auth-section { display: grid; gap: 16px; }
+      .account-header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+      .account-meta { display: grid; gap: 4px; min-width: 0; }
+      .account-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .balance-card { display: grid; gap: 4px; padding: 14px; border: 1px solid #303236; border-radius: 6px; background: #111214; }
+      .balance-card strong { color: #e6e8eb; font-size: 28px; line-height: 1; }
+      .pack-list { display: grid; gap: 8px; }
+      .pack-button { justify-content: space-between; width: 100%; background: #222326; color: #e6e8eb; border-color: #303236; }
+      .pack-button strong { color: #e6e8eb; }
+      .pack-button span { color: #a0a5ae; }
+      .result-page { text-align: left; }
+      .message[data-tone="info"] { color: #9bbce2; }
       .message[data-tone="error"] { color: #ff9a94; }
       .message[data-tone="success"] { color: #9ed7b6; }
     </style>
@@ -64,53 +79,78 @@ function htmlPage(title, body) {
 
 function authPage(config) {
   const body = `<main>
-  <h1>Sign in to Mark</h1>
-  <p>Use your Mark account to buy credits and run hosted analysis from Avid or Premiere.</p>
-  <div class="tabs" role="group" aria-label="Auth mode">
-    <button id="tab-sign-in" class="secondary" type="button" aria-pressed="true">Sign in</button>
-    <button id="tab-sign-up" class="secondary" type="button" aria-pressed="false">Create account</button>
-  </div>
-  <form id="sign-in-form" class="stack">
-    <h2>Welcome back</h2>
-    <label>Email
-      <input id="sign-in-email" type="email" autocomplete="email" placeholder="you@example.com" required>
-    </label>
-    <label>Password
-      <input id="sign-in-password" type="password" autocomplete="current-password" required>
-    </label>
-    <button type="submit">Sign in</button>
-    <button id="forgot-password-button" class="link" type="button">Forgot password?</button>
-    <small id="sign-in-message" class="message"></small>
-  </form>
-  <form id="sign-up-form" class="stack hidden">
-    <h2>Create your account</h2>
-    <label>Email
-      <input id="sign-up-email" type="email" autocomplete="email" placeholder="you@example.com" required>
-    </label>
-    <label>Password
-      <input id="sign-up-password" type="password" autocomplete="new-password" minlength="8" required>
-    </label>
-    <button type="submit">Create account</button>
-    <small id="sign-up-message" class="message"></small>
-  </form>
-  <form id="forgot-password-form" class="stack hidden">
-    <h2>Reset password</h2>
-    <p>Enter your email and Mark will send you a reset link.</p>
-    <label>Email
-      <input id="reset-email" type="email" autocomplete="email" placeholder="you@example.com" required>
-    </label>
-    <div class="actions">
-      <button id="back-to-sign-in-button" class="secondary" type="button">Back</button>
-      <button type="submit">Send reset link</button>
+  <section id="auth-section" class="auth-section">
+    <h1>Sign in to Mark</h1>
+    <p>Use your Mark account to buy credits and run hosted analysis from Avid or Premiere.</p>
+    <div class="tabs" role="group" aria-label="Auth mode">
+      <button id="tab-sign-in" class="secondary" type="button" aria-pressed="true">Sign in</button>
+      <button id="tab-sign-up" class="secondary" type="button" aria-pressed="false">Create account</button>
     </div>
-    <small id="reset-message" class="message"></small>
-  </form>
+    <form id="sign-in-form" class="stack">
+      <h2>Welcome back</h2>
+      <label>Email
+        <input id="sign-in-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+      </label>
+      <label>Password
+        <input id="sign-in-password" type="password" autocomplete="current-password" required>
+      </label>
+      <button id="sign-in-submit" type="submit">Sign in</button>
+      <button id="forgot-password-button" class="link" type="button">Forgot password?</button>
+      <small id="sign-in-message" class="message"></small>
+    </form>
+    <form id="sign-up-form" class="stack hidden">
+      <h2>Create your account</h2>
+      <label>Email
+        <input id="sign-up-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+      </label>
+      <label>Password
+        <input id="sign-up-password" type="password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <button id="sign-up-submit" type="submit">Create account</button>
+      <small id="sign-up-message" class="message"></small>
+    </form>
+    <form id="forgot-password-form" class="stack hidden">
+      <h2>Reset password</h2>
+      <p>Enter your email and Mark will send you a reset link.</p>
+      <label>Email
+        <input id="reset-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+      </label>
+      <div class="actions">
+        <button id="back-to-sign-in-button" class="secondary" type="button">Back</button>
+        <button id="reset-submit" type="submit">Send reset link</button>
+      </div>
+      <small id="reset-message" class="message"></small>
+    </form>
+  </section>
+  <section id="account-section" class="panel hidden">
+    <div class="account-header">
+      <div class="account-meta">
+        <h1>Mark account</h1>
+        <small id="browser-account-email">Signed in</small>
+      </div>
+      <button id="browser-sign-out-button" class="secondary" type="button">Sign out</button>
+    </div>
+    <div class="balance-card">
+      <small>Available credits</small>
+      <strong id="browser-credit-balance">0 min</strong>
+    </div>
+    <div class="stack">
+      <h2>Buy credits</h2>
+      <div id="browser-credit-packs" class="pack-list"></div>
+    </div>
+    <small id="account-message" class="message"></small>
+  </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.0"></script>
 <script>
 const deviceCode = new URLSearchParams(location.search).get("device_code") || "";
 const pendingDeviceCodeKey = "mark.pendingDeviceCode";
 const pendingRecoveryKey = "mark.pendingPasswordRecovery";
+const accountMessage = new URLSearchParams(location.search).get("connected") === "1"
+  ? "Mark is signed in on this computer."
+  : new URLSearchParams(location.search).get("checkout") === "success"
+    ? "Thanks. Credits appear here after Stripe confirms the payment."
+    : "";
 const callbackUrl = ${JSON.stringify(config.appUrl)} + "/auth/callback";
 const client = window.supabase.createClient(${JSON.stringify(config.supabaseUrl)}, ${JSON.stringify(config.supabasePublishableKey)}, {
   auth: {
@@ -126,12 +166,32 @@ function setMessage(id, text, tone) {
   element.textContent = text || "";
   element.dataset.tone = tone || "";
 }
+function setElementMessage(element, text, tone) {
+  element.textContent = text || "";
+  element.dataset.tone = tone || "";
+}
 function setMode(mode) {
+  document.getElementById("auth-section").classList.remove("hidden");
+  document.getElementById("account-section").classList.add("hidden");
   document.getElementById("sign-in-form").classList.toggle("hidden", mode !== "sign-in");
   document.getElementById("sign-up-form").classList.toggle("hidden", mode !== "sign-up");
   document.getElementById("forgot-password-form").classList.toggle("hidden", mode !== "forgot");
   document.getElementById("tab-sign-in").setAttribute("aria-pressed", mode === "sign-in" ? "true" : "false");
   document.getElementById("tab-sign-up").setAttribute("aria-pressed", mode === "sign-up" ? "true" : "false");
+}
+function setButtonBusy(button, busy, busyText) {
+  if (!button) {
+    return;
+  }
+  if (!button.dataset.idleText) {
+    button.dataset.idleText = button.textContent;
+  }
+  button.disabled = Boolean(busy);
+  button.textContent = busy ? busyText : button.dataset.idleText;
+}
+function formatMinutes(value) {
+  const minutes = Number(value);
+  return (Number.isFinite(minutes) ? Math.max(0, Math.floor(minutes)) : 0) + " min";
 }
 async function completeDevice(session, messageId) {
   const savedDeviceCode = window.localStorage.getItem(pendingDeviceCodeKey) || deviceCode;
@@ -139,8 +199,9 @@ async function completeDevice(session, messageId) {
     throw new Error("Supabase did not return a browser session.");
   }
   if (!savedDeviceCode) {
-    setMessage(messageId, "You are signed in. Return to Mark and choose Sign in again to connect this computer.", "success");
-    return;
+    return {
+      connected: false
+    };
   }
   const response = await fetch("/auth/device/complete", {
     method: "POST",
@@ -157,7 +218,89 @@ async function completeDevice(session, messageId) {
     throw new Error(payload.error && payload.error.message || "Could not connect Mark.");
   }
   window.localStorage.removeItem(pendingDeviceCodeKey);
-  setMessage(messageId, "Mark is signed in. You can return to the panel.", "success");
+  if (messageId) {
+    setMessage(messageId, "Mark is signed in on this computer.", "success");
+  }
+  return {
+    connected: true
+  };
+}
+async function fetchBrowserAccount(session) {
+  const response = await fetch("/browser/account", {
+    headers: {
+      "Authorization": "Bearer " + session.access_token
+    }
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error && payload.error.message || "Could not load your Mark account.");
+  }
+  return payload;
+}
+async function startBrowserCheckout(session, packId, button) {
+  setButtonBusy(button, true, "Opening...");
+  setMessage("account-message", "Opening secure checkout...", "info");
+  try {
+    const response = await fetch("/browser/billing/checkout-sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + session.access_token
+      },
+      body: JSON.stringify({
+        packId
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error && payload.error.message || "Could not open checkout.");
+    }
+    if (!payload.url) {
+      throw new Error("Stripe did not return a checkout URL.");
+    }
+    window.location.assign(payload.url);
+  } catch (error) {
+    setButtonBusy(button, false);
+    setMessage("account-message", error.message || "Could not open checkout.", "error");
+  }
+}
+function renderCreditPacks(account, session) {
+  const list = document.getElementById("browser-credit-packs");
+  list.innerHTML = "";
+  const packs = Array.isArray(account.creditPacks) ? account.creditPacks : [];
+  if (packs.length === 0) {
+    const empty = document.createElement("small");
+    empty.textContent = "No credit packs are available yet.";
+    list.appendChild(empty);
+    return;
+  }
+  packs.forEach(function addPack(pack) {
+    const button = document.createElement("button");
+    button.className = "pack-button";
+    button.type = "button";
+    button.innerHTML = "<strong></strong><span></span>";
+    button.querySelector("strong").textContent = pack.label || "Credit pack";
+    button.querySelector("span").textContent = formatMinutes(pack.minutes);
+    button.addEventListener("click", function buyPack() {
+      startBrowserCheckout(session, pack.id, button);
+    });
+    list.appendChild(button);
+  });
+}
+async function showAccount(session, messageText) {
+  const accountPanel = document.getElementById("account-section");
+  const authSection = document.getElementById("auth-section");
+  const messageElement = document.getElementById("account-message");
+  const account = await fetchBrowserAccount(session);
+  authSection.classList.add("hidden");
+  accountPanel.classList.remove("hidden");
+  setElementMessage(messageElement, "Loading your account...", "info");
+  document.getElementById("browser-account-email").textContent = account.user && account.user.email
+    ? account.user.email
+    : "Signed in";
+  document.getElementById("browser-credit-balance").textContent = formatMinutes(account.credits && account.credits.balanceMinutes);
+  renderCreditPacks(account, session);
+  setElementMessage(messageElement, messageText || accountMessage || "You can return to the Mark panel.", "success");
 }
 document.getElementById("tab-sign-in").addEventListener("click", function() {
   setMode("sign-in");
@@ -177,6 +320,8 @@ document.getElementById("back-to-sign-in-button").addEventListener("click", func
 });
 document.getElementById("sign-in-form").addEventListener("submit", async function(event) {
   event.preventDefault();
+  const button = document.getElementById("sign-in-submit");
+  setButtonBusy(button, true, "Signing in...");
   setMessage("sign-in-message", "Signing in...");
   try {
     const result = await client.auth.signInWithPassword({
@@ -186,13 +331,18 @@ document.getElementById("sign-in-form").addEventListener("submit", async functio
     if (result.error) {
       throw result.error;
     }
-    await completeDevice(result.data && result.data.session, "sign-in-message");
+    const session = result.data && result.data.session;
+    const completed = await completeDevice(session, "sign-in-message");
+    await showAccount(session, completed.connected ? "Mark is signed in on this computer." : "You are signed in. Open Mark and choose Sign in to connect this computer.");
   } catch (error) {
+    setButtonBusy(button, false);
     setMessage("sign-in-message", error.message || "Could not sign in.", "error");
   }
 });
 document.getElementById("sign-up-form").addEventListener("submit", async function(event) {
   event.preventDefault();
+  const button = document.getElementById("sign-up-submit");
+  setButtonBusy(button, true, "Creating...");
   setMessage("sign-up-message", "Creating account...");
   try {
     const result = await client.auth.signUp({
@@ -206,16 +356,20 @@ document.getElementById("sign-up-form").addEventListener("submit", async functio
       throw result.error;
     }
     if (result.data && result.data.session) {
-      await completeDevice(result.data.session, "sign-up-message");
+      const completed = await completeDevice(result.data.session, "sign-up-message");
+      await showAccount(result.data.session, completed.connected ? "Mark is signed in on this computer." : "Your Mark account is ready.");
       return;
     }
     setMessage("sign-up-message", "Check your email to confirm your Mark account.", "success");
   } catch (error) {
+    setButtonBusy(button, false);
     setMessage("sign-up-message", error.message || "Could not create account.", "error");
   }
 });
 document.getElementById("forgot-password-form").addEventListener("submit", async function(event) {
   event.preventDefault();
+  const button = document.getElementById("reset-submit");
+  setButtonBusy(button, true, "Sending...");
   setMessage("reset-message", "Sending reset link...");
   try {
     window.localStorage.setItem(pendingRecoveryKey, "1");
@@ -227,9 +381,40 @@ document.getElementById("forgot-password-form").addEventListener("submit", async
     }
     setMessage("reset-message", "Check your email for a password reset link.", "success");
   } catch (error) {
+    setButtonBusy(button, false);
     setMessage("reset-message", error.message || "Could not send reset link.", "error");
   }
 });
+document.getElementById("browser-sign-out-button").addEventListener("click", async function() {
+  const button = document.getElementById("browser-sign-out-button");
+  setButtonBusy(button, true, "Signing out...");
+  try {
+    await client.auth.signOut();
+  } finally {
+    window.localStorage.removeItem(pendingDeviceCodeKey);
+    window.localStorage.removeItem(pendingRecoveryKey);
+    setButtonBusy(button, false);
+    setMode("sign-in");
+    setMessage("sign-in-message", "Signed out of Mark.", "success");
+  }
+});
+(async function restoreBrowserSession() {
+  try {
+    const result = await client.auth.getSession();
+    const session = result.data && result.data.session;
+    if (!session) {
+      return;
+    }
+    if (deviceCode || window.localStorage.getItem(pendingDeviceCodeKey)) {
+      const completed = await completeDevice(session, "");
+      await showAccount(session, completed.connected ? "Mark is signed in on this computer." : "");
+      return;
+    }
+    await showAccount(session, accountMessage);
+  } catch (error) {
+    setMessage("sign-in-message", error.message || "Could not restore your Mark session.", "error");
+  }
+})();
 </script>`;
   return htmlPage("Sign in to Mark", body);
 }
@@ -267,6 +452,15 @@ function setMessage(element, text, tone) {
   element.textContent = text || "";
   element.dataset.tone = tone || "";
 }
+function redirectToAccount(connected) {
+  const target = new URL("/auth/device", location.origin);
+  if (connected) {
+    target.searchParams.set("connected", "1");
+  }
+  window.setTimeout(function redirect() {
+    location.replace(target.toString());
+  }, 400);
+}
 async function readSession() {
   const code = query.get("code");
   if (code) {
@@ -287,7 +481,8 @@ async function completeDevice(session) {
     throw new Error("No Supabase session was found. Request a new Mark sign-in.");
   }
   if (!deviceCode) {
-    setMessage(message, "Your Mark account is ready. Return to Mark and choose Sign in again to connect this computer.", "success");
+    setMessage(message, "Your Mark account is ready.", "success");
+    redirectToAccount(false);
     return;
   }
   const response = await fetch("/auth/device/complete", {
@@ -303,7 +498,8 @@ async function completeDevice(session) {
     throw new Error(payload.error && payload.error.message || "Could not complete sign-in.");
   }
   window.localStorage.removeItem(pendingDeviceCodeKey);
-  setMessage(message, "Mark is signed in. You can return to the panel.", "success");
+  setMessage(message, "Mark is signed in on this computer.", "success");
+  redirectToAccount(true);
 }
 function showPasswordReset(session) {
   document.getElementById("heading").textContent = "Reset your Mark password";
@@ -354,6 +550,25 @@ function showPasswordReset(session) {
 })();
 </script>`;
   return htmlPage("Mark Sign-in Complete", body);
+}
+
+function billingResultPage(options) {
+  const title = options.title || "Mark billing";
+  const heading = options.heading || title;
+  const message = options.message || "";
+  const tone = options.tone || "info";
+  const body = `<main class="result-page">
+  <h1>${heading}</h1>
+  <div class="panel">
+    <p>${message}</p>
+    <small class="message" data-tone="${tone}">${options.detail || ""}</small>
+    <div class="actions">
+      <a class="button-link" href="/auth/device${options.accountQuery || ""}">View account</a>
+      <button class="secondary" type="button" onclick="window.close()">Close</button>
+    </div>
+  </div>
+</main>`;
+  return htmlPage(title, body);
 }
 
 function createApp(options = {}) {
@@ -419,6 +634,27 @@ function createApp(options = {}) {
 
   app.get("/auth/callback", function authCallbackPage(req, res) {
     res.type("html").send(callbackPage(config));
+  });
+
+  app.get("/billing/success", function billingSuccessPage(req, res) {
+    res.type("html").send(billingResultPage({
+      title: "Mark credits purchased",
+      heading: "Payment received",
+      message: "Stripe is confirming the payment and Mark will add the credits automatically.",
+      detail: "If the balance has not changed yet, refresh your account in a moment.",
+      tone: "success",
+      accountQuery: "?checkout=success"
+    }));
+  });
+
+  app.get("/billing/cancel", function billingCancelPage(req, res) {
+    res.type("html").send(billingResultPage({
+      title: "Mark checkout canceled",
+      heading: "Checkout canceled",
+      message: "No payment was made and no credits were added.",
+      detail: "You can choose a credit pack whenever you are ready.",
+      tone: "info"
+    }));
   });
 
   app.post("/auth/device/start", async function startDevice(req, res, next) {
@@ -512,11 +748,38 @@ function createApp(options = {}) {
     }
   });
 
+  app.get("/browser/account", async function getBrowserAccount(req, res, next) {
+    try {
+      const supabaseUser = await validateSupabaseAccessToken(supabaseAuth, bearerToken(req));
+      const account = await store.getAccount(supabaseUser);
+      res.json({
+        authenticated: true,
+        ...account,
+        creditPacks: config.creditPacks.map(publicCreditPack)
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/billing/checkout-sessions", requireMarkSession(config), async function checkout(req, res, next) {
     try {
       const session = await createCheckoutSession(deps, req.markUser, req.body && req.body.packId, {
         successUrl: req.body && req.body.successUrl,
         cancelUrl: req.body && req.body.cancelUrl
+      });
+      res.status(201).json(session);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/browser/billing/checkout-sessions", async function browserCheckout(req, res, next) {
+    try {
+      const supabaseUser = await validateSupabaseAccessToken(supabaseAuth, bearerToken(req));
+      const session = await createCheckoutSession(deps, supabaseUser, req.body && req.body.packId, {
+        successUrl: `${config.appUrl}/billing/success`,
+        cancelUrl: `${config.appUrl}/billing/cancel`
       });
       res.status(201).json(session);
     } catch (error) {

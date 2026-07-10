@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
+const http = require("http");
 const path = require("path");
 
 const config = require("../src/config");
@@ -57,6 +58,55 @@ test("helper exposes health and config without leaking the API key", async funct
     assert.equal(typeof body.hasTwelveLabsApiKey, "boolean");
   } finally {
     await close(server);
+  }
+});
+
+test("helper reports whether sign-in opened in the browser", async function () {
+  const cloud = http.createServer(function cloudHandler(req, res) {
+    if (req.method === "POST" && req.url === "/auth/device/start") {
+      res.writeHead(201, {
+        "Content-Type": "application/json"
+      });
+      res.end(JSON.stringify({
+        deviceCode: "device-test",
+        userCode: "ABCD-1234",
+        verificationUri: "https://mark-cloud.test/auth/device?device_code=device-test",
+        expiresAt: new Date(Date.now() + 60000).toISOString()
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  const cloudServer = await listen(cloud);
+  const server = await listen(app);
+  const port = server.address().port;
+  const previousCloudEnabled = config.markCloudAnalysisEnabled;
+  const previousCloudUrl = config.markCloudUrl;
+  const previousOpenBrowser = config.openBrowserForAuth;
+
+  config.markCloudAnalysisEnabled = true;
+  config.markCloudUrl = `http://127.0.0.1:${cloudServer.address().port}`;
+  config.openBrowserForAuth = false;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/auth/device/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: "{}"
+    });
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.equal(body.deviceCode, "device-test");
+    assert.equal(body.openedInBrowser, false);
+  } finally {
+    config.markCloudAnalysisEnabled = previousCloudEnabled;
+    config.markCloudUrl = previousCloudUrl;
+    config.openBrowserForAuth = previousOpenBrowser;
+    await close(server);
+    await close(cloudServer);
   }
 });
 

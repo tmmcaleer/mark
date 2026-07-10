@@ -129,10 +129,14 @@ app.post("/auth/device/start", function startDeviceRoute(req, res) {
   cloudRequest("POST", "/auth/device/start", req.body || {}, {
     skipAuth: true
   }).then(function started(payload) {
+    let openedInBrowser = false;
     if (payload.verificationUri) {
-      openExternalUrl(payload.verificationUri);
+      openedInBrowser = openExternalUrl(payload.verificationUri);
     }
-    res.status(201).json(payload);
+    res.status(201).json({
+      ...payload,
+      openedInBrowser
+    });
   }).catch(function failed(error) {
     sendError(res, error);
   });
@@ -162,10 +166,14 @@ app.post("/auth/sign-out", function signOutRoute(req, res) {
 
 app.post("/billing/checkout-sessions", function checkoutRoute(req, res) {
   cloudRequest("POST", "/billing/checkout-sessions", req.body || {}).then(function checkout(payload) {
+    let openedInBrowser = false;
     if (payload.url) {
-      openExternalUrl(payload.url);
+      openedInBrowser = openExternalUrl(payload.url);
     }
-    res.status(201).json(payload);
+    res.status(201).json({
+      ...payload,
+      openedInBrowser
+    });
   }).catch(function failed(error) {
     sendError(res, error);
   });
@@ -520,7 +528,7 @@ function cloudRequest(method, requestPath, body, options = {}) {
 
 function openExternalUrl(url) {
   if (!config.openBrowserForAuth || !url) {
-    return;
+    return false;
   }
 
   const command = process.platform === "darwin"
@@ -538,8 +546,10 @@ function openExternalUrl(url) {
       stdio: "ignore"
     });
     child.unref();
+    return true;
   } catch (error) {
     // The panel still receives the URL and can show it if opening fails.
+    return false;
   }
 }
 
