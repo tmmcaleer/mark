@@ -5,6 +5,11 @@ export function createHelperClient(options) {
     : function defaultBaseUrl() {
       return config.baseUrl || "";
     };
+  const getHeaders = typeof config.getHeaders === "function"
+    ? config.getHeaders
+    : function defaultHeaders() {
+      return config.headers || {};
+    };
   const XhrClass = config.XMLHttpRequestClass || globalThis.XMLHttpRequest;
 
   function requestJson(method, path, body) {
@@ -20,6 +25,12 @@ export function createHelperClient(options) {
     return new Promise(function request(resolve, reject) {
       xhr.open(method, url, true);
       xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+      const headers = getHeaders() || {};
+      Object.keys(headers).forEach(function setHeader(name) {
+        if (headers[name] !== undefined && headers[name] !== null) {
+          xhr.setRequestHeader(name, String(headers[name]));
+        }
+      });
       xhr.onload = function onload() {
         let payload = null;
         try {

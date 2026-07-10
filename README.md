@@ -12,6 +12,8 @@ Panel SDK Drop 13 files in `sdk-reference/PanelSDK_.13_Releases_2025`.
 - `panel/` - Avid panel web app and `.avpi` packaging scripts.
 - `premiere/` - Adobe Premiere Pro UXP panel source for the Mark Premiere host.
 - `helper-service/` - Local service with filesystem access and the TwelveLabs API key.
+- `cloud-service/` - Hosted service for Supabase auth, Stripe credit packs, and metered TwelveLabs analysis.
+- `shared/analysis/` - Shared TwelveLabs prompt/result normalization used by hosted analysis.
 - `sdk-reference/` - Avid Panel SDK reference drops.
 
 ## Requirements
@@ -153,11 +155,25 @@ Helper environment variables:
 - `MARK_CLEANUP_EXPORTS` - Delete Mark proxy exports after analysis, default `true`. Set to `0` to keep them for debugging.
 - `MARK_MAX_UPLOAD_BYTES` - Direct upload limit, default `209715200`.
 - `TWELVELABS_API_BASE_URL` - Default `https://api.twelvelabs.io/v1.3`.
+- `MARK_CLOUD_URL` - Hosted Mark API URL. When set, helper analysis runs through the cloud service.
+- `MARK_CLOUD_ANALYSIS_ENABLED` - Force cloud analysis on/off. Defaults to enabled when `MARK_CLOUD_URL` is set.
+- `MARK_SESSION_PATH` - Local path for the Mark session token, default OS app support/config location.
+- `MARK_OPEN_BROWSER` - Open sign-in and checkout URLs from the helper, default `true` outside tests.
+
+Cloud service environment variables:
+
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` - Server-side Supabase access.
+- `SUPABASE_PUBLISHABLE_KEY` - Browser magic-link/device sign-in page key.
+- `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` - Checkout and webhook verification.
+- `MARK_CREDIT_PACKS` - JSON array of `{ "id", "label", "minutes", "stripePriceId" }` credit packs.
+- `MARK_SESSION_SECRET` - HMAC secret for Mark helper sessions.
+- `TWELVELABS_API_KEY` - Required by the hosted service for production analysis.
 
 ## Verification
 
 ```sh
 cd helper-service && npm test
+cd cloud-service && npm test
 cd panel && npm run build
 node --test panel/test/*.test.mjs
 scripts/check-helper-service.sh

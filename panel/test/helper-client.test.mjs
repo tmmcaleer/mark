@@ -78,6 +78,26 @@ test("uses helper error payload messages", async function () {
   );
 });
 
+test("adds configured request headers", async function () {
+  const calls = [];
+  const client = createHelperClient({
+    baseUrl: "http://localhost:4500",
+    headers: {
+      "X-Mark-Test": "yes"
+    },
+    XMLHttpRequestClass: createMockXhr([
+      {
+        status: 200,
+        responseText: "{\"ok\":true}"
+      }
+    ], calls)
+  });
+
+  await client.requestJson("GET", "/account");
+
+  assert.equal(calls[0].headers["X-Mark-Test"], "yes");
+});
+
 test("reports invalid helper JSON and network failures", async function () {
   const invalidJsonClient = createHelperClient({
     baseUrl: "http://localhost:4500",

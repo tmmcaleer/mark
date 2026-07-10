@@ -1,9 +1,16 @@
 const fs = require("fs");
 const path = require("path");
+const childProcess = require("child_process");
+const axios = require("axios");
 const express = require("express");
 const cors = require("cors");
 
 const config = require("./config");
+const {
+  clearSession,
+  readSession,
+  writeSession
+} = require("./auth-session");
 const {
   cleanupExportedFile,
   createJob,
@@ -66,7 +73,100 @@ app.get("/config", function getConfig(req, res) {
     thumbnailsEnabled: config.thumbnailsEnabled,
     thumbnailWidth: config.thumbnailWidth,
     maxThumbnailsPerJob: config.maxThumbnailsPerJob,
-    hasTwelveLabsApiKey: Boolean(config.twelveLabsApiKey)
+    hasTwelveLabsApiKey: Boolean(config.twelveLabsApiKey),
+    analysisMode: config.markCloudAnalysisEnabled ? "cloud" : "local",
+    cloudAnalysisEnabled: config.markCloudAnalysisEnabled,
+    cloudUrl: config.markCloudUrl,
+    hasMarkSession: Boolean(readSession(config.markSessionPath).token)
+  });
+});
+
+app.get("/account", function getAccountRoute(req, res) {
+  if (!config.markCloudAnalysisEnabled) {
+    res.json({
+      authenticated: false,
+      analysisMode: "local",
+      credits: {
+        balanceMinutes: null
+      },
+      creditPacks: []
+    });
+    return;
+  }
+
+  const token = readSession(config.markSessionPath).token;
+  if (!token) {
+    res.json({
+      authenticated: false,
+      analysisMode: "cloud",
+      credits: {
+        balanceMinutes: 0
+      },
+      creditPacks: []
+    });
+    return;
+  }
+
+  cloudRequest("GET", "/account").then(function ok(account) {
+    res.json(account);
+  }).catch(function failed(error) {
+    sendError(res, error);
+  });
+});
+
+app.post("/auth/device/start", function startDeviceRoute(req, res) {
+  if (!config.markCloudAnalysisEnabled || !config.markCloudUrl) {
+    res.status(503).json({
+      error: {
+        code: "CLOUD_NOT_CONFIGURED",
+        message: "MARK_CLOUD_URL is not configured"
+      }
+    });
+    return;
+  }
+
+  cloudRequest("POST", "/auth/device/start", req.body || {}, {
+    skipAuth: true
+  }).then(function started(payload) {
+    if (payload.verificationUri) {
+      openExternalUrl(payload.verificationUri);
+    }
+    res.status(201).json(payload);
+  }).catch(function failed(error) {
+    sendError(res, error);
+  });
+});
+
+app.get("/auth/device/poll", function pollDeviceRoute(req, res) {
+  const deviceCode = req.query.deviceCode || req.query.device_code;
+  cloudRequest("GET", `/auth/device/poll?deviceCode=${encodeURIComponent(deviceCode || "")}`, null, {
+    skipAuth: true
+  }).then(function polled(payload) {
+    if (payload.status === "authorized" && payload.markSessionToken) {
+      writeSession(config.markSessionPath, payload.markSessionToken);
+    }
+    res.json({
+      status: payload.status,
+      expiresAt: payload.expiresAt
+    });
+  }).catch(function failed(error) {
+    sendError(res, error);
+  });
+});
+
+app.post("/auth/sign-out", function signOutRoute(req, res) {
+  clearSession(config.markSessionPath);
+  res.status(204).end();
+});
+
+app.post("/billing/checkout-sessions", function checkoutRoute(req, res) {
+  cloudRequest("POST", "/billing/checkout-sessions", req.body || {}).then(function checkout(payload) {
+    if (payload.url) {
+      openExternalUrl(payload.url);
+    }
+    res.status(201).json(payload);
+  }).catch(function failed(error) {
+    sendError(res, error);
   });
 });
 
@@ -79,11 +179,21 @@ app.post("/proxy/resolve", function resolveProxyRoute(req, res) {
 });
 
 app.post("/jobs", function createJobRoute(req, res) {
-  if (!config.twelveLabsApiKey) {
+  if (!config.markCloudAnalysisEnabled && !config.twelveLabsApiKey) {
     res.status(503).json({
       error: {
         code: "MISSING_API_KEY",
         message: "TWELVELABS_API_KEY is not set in the helper service environment"
+      }
+    });
+    return;
+  }
+
+  if (config.markCloudAnalysisEnabled && !readSession(config.markSessionPath).token) {
+    res.status(401).json({
+      error: {
+        code: "AUTH_REQUIRED",
+        message: "Sign in to Mark before analyzing media"
       }
     });
     return;
@@ -367,6 +477,69 @@ function sendError(res, error) {
       details: error.details
     }
   });
+}
+
+function cloudRequest(method, requestPath, body, options = {}) {
+  if (!config.markCloudUrl) {
+    return Promise.reject(new MarkError("MARK_CLOUD_URL is not configured", {
+      code: "CLOUD_NOT_CONFIGURED",
+      statusCode: 503
+    }));
+  }
+
+  const token = readSession(config.markSessionPath).token;
+  if (!options.skipAuth && !token) {
+    return Promise.reject(new MarkError("Sign in to Mark first", {
+      code: "AUTH_REQUIRED",
+      statusCode: 401
+    }));
+  }
+
+  return axios({
+    method,
+    url: `${config.markCloudUrl.replace(/\/+$/, "")}${requestPath}`,
+    data: body || undefined,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token && !options.skipAuth ? {
+        Authorization: `Bearer ${token}`
+      } : {})
+    }
+  }).then(function parse(response) {
+    return response.data;
+  }).catch(function normalize(error) {
+    const payload = error.response && error.response.data && error.response.data.error;
+    throw new MarkError(payload && payload.message || error.message, {
+      code: payload && payload.code || "CLOUD_REQUEST_FAILED",
+      statusCode: error.response && error.response.status || 502,
+      details: payload && payload.details
+    });
+  });
+}
+
+function openExternalUrl(url) {
+  if (!config.openBrowserForAuth || !url) {
+    return;
+  }
+
+  const command = process.platform === "darwin"
+    ? "open"
+    : process.platform === "win32"
+      ? "cmd"
+      : "xdg-open";
+  const args = process.platform === "win32"
+    ? ["/c", "start", "", url]
+    : [url];
+
+  try {
+    const child = childProcess.spawn(command, args, {
+      detached: true,
+      stdio: "ignore"
+    });
+    child.unref();
+  } catch (error) {
+    // The panel still receives the URL and can show it if opening fails.
+  }
 }
 
 if (require.main === module) {

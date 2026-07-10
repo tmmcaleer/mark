@@ -231,6 +231,34 @@ h4 {
   flex: 0 0 auto;
 }
 
+.account-button {
+  min-width: 68px;
+  max-width: 112px;
+  min-height: 34px;
+  padding: 0 10px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-button:not(:disabled):hover {
+  color: var(--text);
+}
+
+.account-credit-balance {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 590;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .brand {
   display: grid;
   gap: var(--space-1);

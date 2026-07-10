@@ -163,6 +163,47 @@ test("helper rejects jobs when TWELVELABS_API_KEY is missing", async function ()
   }
 });
 
+test("helper rejects cloud jobs when Mark session is missing", async function () {
+  const server = await listen(app);
+  const port = server.address().port;
+  const previousCloudEnabled = config.markCloudAnalysisEnabled;
+  const previousCloudUrl = config.markCloudUrl;
+  const previousSessionPath = config.markSessionPath;
+  const sessionRoot = fs.mkdtempSync(path.join(require("os").tmpdir(), "mark-session-test-"));
+  const proxyPath = path.join(sessionRoot, "proxy.mp4");
+
+  fs.writeFileSync(proxyPath, "proxy");
+  config.markCloudAnalysisEnabled = true;
+  config.markCloudUrl = "http://127.0.0.1:4510";
+  config.markSessionPath = path.join(sessionRoot, "session.json");
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/jobs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        filePath: proxyPath,
+        prompt: "make markers"
+      })
+    });
+
+    assert.equal(response.status, 401);
+    const body = await response.json();
+    assert.equal(body.error.code, "AUTH_REQUIRED");
+  } finally {
+    config.markCloudAnalysisEnabled = previousCloudEnabled;
+    config.markCloudUrl = previousCloudUrl;
+    config.markSessionPath = previousSessionPath;
+    fs.rmSync(sessionRoot, {
+      recursive: true,
+      force: true
+    });
+    await close(server);
+  }
+});
+
 test("helper serves generated job thumbnails", async function () {
   const previousThumbnailsDir = config.thumbnailsDir;
   const thumbnailRoot = fs.mkdtempSync(path.join(require("os").tmpdir(), "mark-thumbnail-route-"));

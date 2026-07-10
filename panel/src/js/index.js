@@ -165,6 +165,7 @@ let client;
 let host;
 let helperClient;
 let pollTimer = null;
+let authPollTimer = null;
 
 const state = {
   selectedAssets: [],
@@ -194,7 +195,9 @@ const state = {
   viewMode: "drop",
   previousViewMode: "drop",
   isBusy: false,
-  isApplying: false
+  isApplying: false,
+  account: null,
+  authDeviceCode: ""
 };
 
 const dom = {};
@@ -210,6 +213,9 @@ function initDom() {
     "settings-view",
     "queue-toggle",
     "queue-badge",
+    "account-button",
+    "account-summary",
+    "buy-credits-button",
     "queue-summary",
     "queue-empty",
     "queue-list",
@@ -258,6 +264,13 @@ function initDom() {
     "helper-status-dot",
     "api-key-status",
     "api-key-status-dot",
+    "account-detail",
+    "account-credit-balance",
+    "account-email",
+    "credit-pack-select",
+    "sign-in-button",
+    "sign-out-button",
+    "settings-buy-credits-button",
     "export-setting-select",
     "refresh-export-settings-button",
     "export-setting-summary",
@@ -550,6 +563,94 @@ function totalMarkerCount() {
   return totalSuggestionCount();
 }
 
+function accountRequiresSignIn() {
+  return Boolean(state.helperConfig && state.helperConfig.cloudAnalysisEnabled)
+    && !(state.account && state.account.authenticated);
+}
+
+function accountCreditText(account) {
+  if (!state.helperConfig || !state.helperConfig.cloudAnalysisEnabled) {
+    return "Local";
+  }
+  const minutes = account && account.credits ? Number(account.credits.balanceMinutes) : 0;
+  return `${Number.isFinite(minutes) ? minutes : 0} min`;
+}
+
+function renderAccount() {
+  const cloudEnabled = Boolean(state.helperConfig && state.helperConfig.cloudAnalysisEnabled);
+  const account = state.account || {
+    authenticated: false,
+    credits: {
+      balanceMinutes: 0
+    },
+    creditPacks: []
+  };
+  const authenticated = cloudEnabled && account.authenticated;
+  const creditPacks = Array.isArray(account.creditPacks) ? account.creditPacks : [];
+
+  if (dom["account-summary"]) {
+    dom["account-summary"].textContent = cloudEnabled
+      ? authenticated
+        ? accountCreditText(account)
+        : "Sign in"
+      : "Local";
+  }
+  if (dom["account-button"]) {
+    dom["account-button"].disabled = !cloudEnabled;
+    dom["account-button"].title = cloudEnabled
+      ? authenticated
+        ? "Mark account"
+        : "Sign in to Mark"
+      : "Local analysis";
+  }
+  if (dom["buy-credits-button"]) {
+    dom["buy-credits-button"].classList.toggle("hidden", !authenticated);
+    dom["buy-credits-button"].disabled = !authenticated || creditPacks.length === 0;
+  }
+  if (dom["account-detail"]) {
+    dom["account-detail"].textContent = cloudEnabled
+      ? authenticated
+        ? "Signed in for hosted analysis."
+        : "Sign in to use hosted analysis."
+      : "Local analysis mode.";
+  }
+  if (dom["account-credit-balance"]) {
+    dom["account-credit-balance"].textContent = accountCreditText(account);
+  }
+  if (dom["account-email"]) {
+    dom["account-email"].textContent = authenticated && account.user
+      ? account.user.email || "Signed in"
+      : "Not signed in";
+  }
+  if (dom["credit-pack-select"]) {
+    dom["credit-pack-select"].innerHTML = "";
+    if (creditPacks.length === 0) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No packs available";
+      dom["credit-pack-select"].appendChild(option);
+    } else {
+      creditPacks.forEach(function addPack(pack) {
+        const option = document.createElement("option");
+        option.value = pack.id;
+        option.textContent = `${pack.label} - ${pack.minutes} min`;
+        dom["credit-pack-select"].appendChild(option);
+      });
+    }
+    dom["credit-pack-select"].disabled = !authenticated || creditPacks.length === 0;
+  }
+  if (dom["sign-in-button"]) {
+    dom["sign-in-button"].disabled = !cloudEnabled || authenticated || state.isBusy;
+  }
+  if (dom["sign-out-button"]) {
+    dom["sign-out-button"].disabled = !authenticated || state.isBusy;
+  }
+  if (dom["settings-buy-credits-button"]) {
+    dom["settings-buy-credits-button"].disabled = !authenticated || creditPacks.length === 0 || state.isBusy;
+  }
+  setBusy(state.isBusy);
+}
+
 function updateApplyButtonLabel() {
   const count = selectedUnappliedMarkerCount();
   dom["apply-button"].textContent = selectedCountLabel(state.workflowMode, count);
@@ -558,7 +659,7 @@ function updateApplyButtonLabel() {
 function setBusy(isBusy) {
   state.isBusy = Boolean(isBusy);
   const hasPrompt = Boolean(dom["marker-prompt"].value.trim());
-  const canAnalyze = state.selectedAssets.length > 0 && hasPrompt;
+  const canAnalyze = state.selectedAssets.length > 0 && hasPrompt && !accountRequiresSignIn();
 
   dom["analyze-button"].disabled = state.isBusy || !canAnalyze;
   dom["apply-button"].disabled = state.isApplying || selectedUnappliedMarkerCount() === 0;
@@ -2763,14 +2864,18 @@ function checkHelper(options) {
     });
     dom["connection-status"].textContent = "Online";
     dom["helper-status-dot"].dataset.status = "ready";
-    dom["api-key-status"].textContent = config.hasTwelveLabsApiKey ? "Ready" : "Missing";
-    dom["api-key-status-dot"].dataset.status = config.hasTwelveLabsApiKey ? "ready" : "warning";
+    dom["api-key-status"].textContent = config.cloudAnalysisEnabled
+      ? "Cloud"
+      : config.hasTwelveLabsApiKey ? "Ready" : "Missing";
+    dom["api-key-status-dot"].dataset.status = (config.cloudAnalysisEnabled || config.hasTwelveLabsApiKey) ? "ready" : "warning";
     if (state.exportSettingsLoaded) {
       renderExportSettings(state.exportSettings, config);
     }
     updateProxyRepositorySummary();
+    refreshAccount({ silent: true }).catch(function noop() {});
     if (!silent) {
-      setStatus(config.hasTwelveLabsApiKey ? "Helper connected." : "Helper connected, but TWELVELABS_API_KEY is missing.", !config.hasTwelveLabsApiKey);
+      const analysisReady = config.cloudAnalysisEnabled || config.hasTwelveLabsApiKey;
+      setStatus(analysisReady ? "Helper connected." : "Helper connected, but TWELVELABS_API_KEY is missing.", !analysisReady);
     }
     return config;
   }).catch(function failed(error) {
@@ -2782,6 +2887,112 @@ function checkHelper(options) {
       setStatus(error.message, true);
     }
     throw error;
+  });
+}
+
+function refreshAccount(options) {
+  const silent = options && options.silent;
+  return requestJson("GET", "/account").then(function loaded(account) {
+    state.account = account;
+    renderAccount();
+    return account;
+  }).catch(function failed(error) {
+    state.account = {
+      authenticated: false,
+      credits: {
+        balanceMinutes: 0
+      },
+      creditPacks: []
+    };
+    renderAccount();
+    if (!silent) {
+      setStatus(error.message, true);
+    }
+    throw error;
+  });
+}
+
+function clearAuthPoll() {
+  if (authPollTimer) {
+    window.clearTimeout(authPollTimer);
+    authPollTimer = null;
+  }
+}
+
+function startSignIn() {
+  if (!state.helperConfig || !state.helperConfig.cloudAnalysisEnabled) {
+    setStatus("Hosted Mark analysis is not configured.", true);
+    return;
+  }
+  clearAuthPoll();
+  requestJson("POST", "/auth/device/start", {
+    clientName: "Mark Avid Panel"
+  }).then(function started(payload) {
+    state.authDeviceCode = payload.deviceCode || "";
+    setStatus("Check your browser to finish signing in.");
+    pollSignIn();
+  }).catch(function failed(error) {
+    setStatus(error.message, true);
+  });
+}
+
+function pollSignIn() {
+  if (!state.authDeviceCode) {
+    return;
+  }
+  requestJson("GET", `/auth/device/poll?deviceCode=${encodeURIComponent(state.authDeviceCode)}`).then(function polled(payload) {
+    if (payload.status === "authorized") {
+      clearAuthPoll();
+      state.authDeviceCode = "";
+      refreshAccount({ silent: true }).then(function refreshed() {
+        setStatus("Signed in to Mark.");
+      });
+      return;
+    }
+    if (payload.status === "expired") {
+      clearAuthPoll();
+      state.authDeviceCode = "";
+      setStatus("Mark sign-in expired. Try again.", true);
+      return;
+    }
+    authPollTimer = window.setTimeout(pollSignIn, 2000);
+  }).catch(function failed(error) {
+    clearAuthPoll();
+    setStatus(error.message, true);
+  });
+}
+
+function signOut() {
+  clearAuthPoll();
+  requestJson("POST", "/auth/sign-out", {}).then(function signedOut() {
+    state.account = {
+      authenticated: false,
+      credits: {
+        balanceMinutes: 0
+      },
+      creditPacks: []
+    };
+    renderAccount();
+    setStatus("Signed out of Mark.");
+  }).catch(function failed(error) {
+    setStatus(error.message, true);
+  });
+}
+
+function buyCredits() {
+  const packId = dom["credit-pack-select"] && dom["credit-pack-select"].value
+    ? dom["credit-pack-select"].value
+    : state.account && state.account.creditPacks && state.account.creditPacks[0] && state.account.creditPacks[0].id;
+  if (!packId) {
+    setStatus("No Mark credit packs are configured.", true);
+    return;
+  }
+  requestJson("POST", "/billing/checkout-sessions", {
+    packId
+  }).then(function checkout() {
+    setStatus("Checkout opened in your browser.");
+  }).catch(function failed(error) {
+    setStatus(error.message, true);
   });
 }
 
@@ -5221,6 +5432,17 @@ function registerEvents() {
   });
   dom["analyze-button"].addEventListener("click", startAnalyze);
   dom["apply-button"].addEventListener("click", applyCurrentSuggestions);
+  dom["account-button"].addEventListener("click", function onAccountButton() {
+    if (accountRequiresSignIn()) {
+      startSignIn();
+      return;
+    }
+    openSettings();
+  });
+  dom["sign-in-button"].addEventListener("click", startSignIn);
+  dom["sign-out-button"].addEventListener("click", signOut);
+  dom["buy-credits-button"].addEventListener("click", buyCredits);
+  dom["settings-buy-credits-button"].addEventListener("click", buyCredits);
   dom["check-helper-button"].addEventListener("click", function onCheckHelper() {
     checkHelper().catch(function noop() {});
   });
@@ -5316,6 +5538,7 @@ document.addEventListener("DOMContentLoaded", function main() {
   renderPreview();
   renderQueue();
   renderFavoritePrompts();
+  renderAccount();
   setViewMode("drop");
   checkHelper({ silent: true }).catch(function noop() {});
   refreshExportSettings(false).catch(function noop() {});

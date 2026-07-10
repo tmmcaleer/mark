@@ -1,6 +1,7 @@
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const { defaultSessionPath } = require("./auth-session");
 
 const DEFAULT_MAX_DIRECT_UPLOAD_BYTES = 200 * 1024 * 1024;
 const DEFAULT_PROXY_EXTENSIONS = [".mp4", ".mov", ".m4v"];
@@ -92,6 +93,10 @@ const config = {
   port: intFromEnv("MARK_HELPER_PORT", 4500),
   twelveLabsApiKey: process.env.TWELVELABS_API_KEY || "",
   twelveLabsBaseUrl: process.env.TWELVELABS_API_BASE_URL || "https://api.twelvelabs.io/v1.3",
+  markCloudUrl: stringFromEnv("MARK_CLOUD_URL", ""),
+  markCloudAnalysisEnabled: boolFromEnv("MARK_CLOUD_ANALYSIS_ENABLED", Boolean(process.env.MARK_CLOUD_URL)),
+  markSessionPath: stringFromEnv("MARK_SESSION_PATH", defaultSessionPath()),
+  openBrowserForAuth: boolFromEnv("MARK_OPEN_BROWSER", process.env.NODE_ENV !== "test"),
   exportSettingsName: process.env.MARK_EXPORT_SETTING || "Mark 12Labs Proxy",
   exportDestinationPath: process.env.MARK_EXPORT_DIR || path.join(os.tmpdir(), "mark-exports"),
   cleanupExportedProxies: boolFromEnv("MARK_CLEANUP_EXPORTS", true),

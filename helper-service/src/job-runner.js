@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 
 const config = require("./config");
+const { readSession } = require("./auth-session");
+const { CloudAnalysisClient } = require("./cloud-analysis-client");
 const { MarkError } = require("./mark-error");
 const {
   cleanupPreparedSegments,
@@ -381,13 +383,7 @@ async function runJob(job, options = {}) {
     cleanupMs: 0,
     segments: []
   };
-  const client = options.client || new TwelveLabsClient({
-    apiKey: options.apiKey || config.twelveLabsApiKey,
-    baseUrl: options.baseUrl || config.twelveLabsBaseUrl,
-    pollIntervalMs: config.pollIntervalMs,
-    assetTimeoutMs: config.assetTimeoutMs,
-    taskTimeoutMs: config.taskTimeoutMs
-  });
+  const client = options.client || createAnalysisClient(options);
   const mediaPreparer = options.mediaPreparer || prepareMediaForUpload;
   const cleanupPrepared = options.cleanupPreparedSegments || cleanupPreparedSegments;
   let prepared = null;
@@ -448,6 +444,13 @@ async function runJob(job, options = {}) {
       columns: job.promptContext && job.promptContext.columns || {}
     });
 
+    if (client && typeof client.startJob === "function") {
+      await client.startJob(job, segments);
+      appendJobDebug(job, "Cloud analysis job", {
+        segmentCount: segments.length
+      });
+    }
+
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index];
       updateJob(job, {
@@ -466,7 +469,11 @@ async function runJob(job, options = {}) {
         job.markerOutputStyle,
         job.outputMode,
         job.subclipOptions,
-        job.promptContext
+        job.promptContext,
+        {
+          segment,
+          segmentIndex: index
+        }
       );
       const analysisElapsedMs = elapsedSince(analysisStartedAt);
       timing.analysisMs += analysisElapsedMs;
@@ -538,8 +545,20 @@ async function runJob(job, options = {}) {
       subclips: finalSubclips,
       twelveLabs
     });
+    if (client && typeof client.completeJob === "function") {
+      await client.completeJob(job);
+    }
     appendTiming(job, "Job total timing", jobStartedAt, timing);
   } catch (error) {
+    if (client && typeof client.failJob === "function" && !job.completedAt) {
+      try {
+        await client.failJob(error);
+      } catch (failError) {
+        appendJobDebug(job, "Cloud analysis fail callback failed", {
+          error: failError.message
+        });
+      }
+    }
     updateJob(job, {
       status: "failed",
       stage: "failed",
@@ -584,11 +603,31 @@ async function runJob(job, options = {}) {
   return job;
 }
 
+function createAnalysisClient(options) {
+  if (config.markCloudAnalysisEnabled) {
+    return new CloudAnalysisClient({
+      baseUrl: options.cloudBaseUrl || config.markCloudUrl,
+      getSessionToken: options.getSessionToken || function getSavedToken() {
+        return readSession(config.markSessionPath).token;
+      }
+    });
+  }
+
+  return new TwelveLabsClient({
+    apiKey: options.apiKey || config.twelveLabsApiKey,
+    baseUrl: options.baseUrl || config.twelveLabsBaseUrl,
+    pollIntervalMs: config.pollIntervalMs,
+    assetTimeoutMs: config.assetTimeoutMs,
+    taskTimeoutMs: config.taskTimeoutMs
+  });
+}
+
 module.exports = {
   cleanupExportedFile,
   createJob,
   publicJob,
   runJob,
+  createAnalysisClient,
   normalizeOutputMode,
   normalizeMediaSourceKind,
   validateJobRequest

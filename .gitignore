@@ -8,3 +8,4 @@ coverage/
 signed-release/
 *.log
 helper-service/.env
+supabase/.temp/

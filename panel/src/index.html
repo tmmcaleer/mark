@@ -12,6 +12,10 @@
           <h1 id="view-title">Hi, I'm Mark.</h1>
         </div>
         <div class="topbar-actions">
+          <button id="account-button" class="account-button secondary-button" type="button" title="Mark account">
+            <span id="account-summary">Local</span>
+          </button>
+          <button id="buy-credits-button" class="secondary-button hidden" type="button">Buy</button>
           <button id="queue-toggle" class="icon-button secondary-button queue-toggle" type="button" aria-label="Render queue" title="Render queue" aria-expanded="false" aria-controls="queue-view">
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <path d="M4 7h16"></path>
@@ -356,6 +360,31 @@
                     </label>
                   </div>
                   <small id="subclip-name-preview" class="subclip-name-preview">Clip.sub.0</small>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section" aria-labelledby="settings-account-heading">
+              <div class="settings-section-heading">
+                <h3 id="settings-account-heading">Account</h3>
+                <p id="account-detail">Local analysis mode.</p>
+              </div>
+              <div class="settings-fields settings-fields-two">
+                <div class="field">
+                  <span>Credits</span>
+                  <strong id="account-credit-balance" class="account-credit-balance">Local</strong>
+                  <small id="account-email">Not signed in</small>
+                </div>
+                <label class="field" for="credit-pack-select">
+                  <span>Credit pack</span>
+                  <select id="credit-pack-select" disabled>
+                    <option value="">No packs available</option>
+                  </select>
+                </label>
+                <div class="account-actions field-wide">
+                  <button id="sign-in-button" class="primary-button" type="button">Sign in</button>
+                  <button id="sign-out-button" class="secondary-button" type="button" disabled>Sign out</button>
+                  <button id="settings-buy-credits-button" class="secondary-button" type="button" disabled>Buy credits</button>
                 </div>
               </div>
             </section>
