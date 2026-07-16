@@ -295,6 +295,10 @@ POSTINSTALL
 chmod +x "$SCRIPTS_DIR/preinstall" "$SCRIPTS_DIR/postinstall"
 
 log "Building component packages"
+HELPER_COMPONENT_PLIST="$REPO_ROOT/build-temp/helper-component.plist"
+pkgbuild --analyze --root "$PACKAGE_ROOT/Applications" "$HELPER_COMPONENT_PLIST"
+plutil -replace 0.BundleIsRelocatable -bool NO "$HELPER_COMPONENT_PLIST"
+
 pkgbuild \
   --root "$PACKAGE_ROOT/Library" \
   --identifier "$PKG_PREFIX.avpi" \
@@ -305,6 +309,7 @@ pkgbuild \
 
 pkgbuild \
   --root "$PACKAGE_ROOT/Applications" \
+  --component-plist "$HELPER_COMPONENT_PLIST" \
   --scripts "$SCRIPTS_DIR" \
   --identifier "$PKG_PREFIX.helper" \
   --version "$VERSION" \

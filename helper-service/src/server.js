@@ -6,6 +6,7 @@ const express = require("express");
 const cors = require("cors");
 
 const config = require("./config");
+const packageInfo = require("../package.json");
 const {
   clearSession,
   readSession,
@@ -47,8 +48,8 @@ app.use(express.json({
 app.get("/health", function health(req, res) {
   res.json({
     ok: true,
-    name: "mark-helper-service",
-    version: "0.1.0"
+    name: packageInfo.name,
+    version: packageInfo.version
   });
 });
 
