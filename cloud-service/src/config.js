@@ -45,6 +45,15 @@ function stringFromEnv(name, fallback) {
   return text || fallback;
 }
 
+function listFromEnv(name) {
+  return String(process.env[name] || "")
+    .split(/[\n,]/)
+    .map(function clean(item) {
+      return item.trim().replace(/\/+$/, "");
+    })
+    .filter(Boolean);
+}
+
 function parseCreditPacks() {
   const raw = process.env.MARK_CREDIT_PACKS;
   if (!raw) {
@@ -53,13 +62,25 @@ function parseCreditPacks() {
         id: "starter",
         label: "Starter",
         minutes: 60,
+        amountCents: 499,
+        currency: "usd",
         stripePriceId: "price_mark_starter"
       },
       {
         id: "studio",
         label: "Studio",
         minutes: 240,
+        amountCents: 1499,
+        currency: "usd",
         stripePriceId: "price_mark_studio"
+      },
+      {
+        id: "production",
+        label: "Production",
+        minutes: 600,
+        amountCents: 3599,
+        currency: "usd",
+        stripePriceId: "price_mark_production"
       }
     ];
   }
@@ -73,22 +94,42 @@ function parseCreditPacks() {
     const id = String(pack.id || "").trim();
     const label = String(pack.label || id).trim();
     const minutes = Number(pack.minutes);
+    const amountCents = Number(pack.amountCents);
+    const currency = String(pack.currency || "").trim().toLowerCase();
     const stripePriceId = String(pack.stripePriceId || pack.priceId || "").trim();
-    if (!id || !label || !Number.isFinite(minutes) || minutes <= 0 || !stripePriceId) {
-      throw new Error("Each MARK_CREDIT_PACKS item needs id, label, minutes, and stripePriceId");
+    if (!id || !label || !Number.isFinite(minutes) || minutes <= 0 || !Number.isInteger(amountCents) || amountCents <= 0 || !/^[a-z]{3}$/.test(currency) || !stripePriceId) {
+      throw new Error("Each MARK_CREDIT_PACKS item needs id, label, minutes, amountCents, currency, and stripePriceId");
     }
     return {
       id,
       label,
       minutes: Math.floor(minutes),
+      amountCents,
+      currency,
       stripePriceId
     };
   });
 }
 
+const appUrl = stringFromEnv("MARK_CLOUD_APP_URL", "http://localhost:4510").replace(/\/+$/, "");
+const webAppUrl = stringFromEnv("MARK_WEB_APP_URL", appUrl).replace(/\/+$/, "");
+const webAppOrigin = new URL(webAppUrl).origin;
+const corsOrigins = Array.from(new Set([
+  webAppOrigin,
+  "https://markmarks.app",
+  "https://www.markmarks.app",
+  "http://localhost:3000",
+  "http://localhost:4173",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  ...listFromEnv("MARK_CORS_ORIGINS")
+]));
+
 const config = {
   port: intFromEnv("MARK_CLOUD_PORT", intFromEnv("PORT", 4510)),
-  appUrl: stringFromEnv("MARK_CLOUD_APP_URL", "http://localhost:4510"),
+  appUrl,
+  webAppUrl,
+  corsOrigins,
   supabaseUrl: stringFromEnv("SUPABASE_URL", ""),
   supabasePublishableKey: stringFromEnv("SUPABASE_PUBLISHABLE_KEY", stringFromEnv("SUPABASE_ANON_KEY", "")),
   supabaseSecretKey: stringFromEnv("SUPABASE_SECRET_KEY", stringFromEnv("SUPABASE_SERVICE_ROLE_KEY", "")),

@@ -165,7 +165,10 @@ Cloud service environment variables:
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` - Server-side Supabase access.
 - `SUPABASE_PUBLISHABLE_KEY` - Browser account/device sign-in page key.
 - `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` - Checkout and webhook verification.
-- `MARK_CREDIT_PACKS` - JSON array of `{ "id", "label", "minutes", "stripePriceId" }` credit packs.
+- `MARK_CLOUD_APP_URL` - Public cloud API URL, such as `https://mark-cloud-api.onrender.com`.
+- `MARK_WEB_APP_URL` - Trusted customer web app origin used for device sign-in and Stripe return URLs.
+- `MARK_CORS_ORIGINS` - Optional comma- or newline-separated additional customer web origins.
+- `MARK_CREDIT_PACKS` - JSON array of `{ "id", "label", "minutes", "amountCents", "currency", "stripePriceId" }` credit packs.
 - `MARK_SESSION_SECRET` - HMAC secret for Mark helper sessions.
 - `TWELVELABS_API_KEY` - Required by the hosted service for production analysis.
 

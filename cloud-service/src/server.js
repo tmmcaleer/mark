@@ -614,7 +614,10 @@ function createApp(options = {}) {
   };
 
   app.use(cors({
-    origin: true
+    origin: function allowConfiguredOrigin(origin, callback) {
+      const allowedOrigins = config.corsOrigins || [];
+      callback(null, !origin || allowedOrigins.includes(origin));
+    }
   }));
 
   app.post("/webhooks/stripe", express.raw({
@@ -696,7 +699,7 @@ function createApp(options = {}) {
       res.status(201).json({
         deviceCode,
         userCode,
-        verificationUri: `${config.appUrl}/auth/device?device_code=${encodeURIComponent(deviceCode)}`,
+        verificationUri: `${config.webAppUrl || config.appUrl}/auth/device?device_code=${encodeURIComponent(deviceCode)}`,
         expiresAt,
         intervalSeconds: 2
       });
@@ -768,6 +771,12 @@ function createApp(options = {}) {
     }
   });
 
+  app.get("/browser/credit-packs", function getPublicCreditPacks(req, res) {
+    res.json({
+      creditPacks: config.creditPacks.map(publicCreditPack)
+    });
+  });
+
   app.get("/browser/account", async function getBrowserAccount(req, res, next) {
     try {
       const supabaseUser = await validateSupabaseAccessToken(supabaseAuth, bearerToken(req));
@@ -784,10 +793,7 @@ function createApp(options = {}) {
 
   app.post("/billing/checkout-sessions", requireMarkSession(config), async function checkout(req, res, next) {
     try {
-      const session = await createCheckoutSession(deps, req.markUser, req.body && req.body.packId, {
-        successUrl: req.body && req.body.successUrl,
-        cancelUrl: req.body && req.body.cancelUrl
-      });
+      const session = await createCheckoutSession(deps, req.markUser, req.body && req.body.packId);
       res.status(201).json(session);
     } catch (error) {
       next(error);
@@ -797,10 +803,7 @@ function createApp(options = {}) {
   app.post("/browser/billing/checkout-sessions", async function browserCheckout(req, res, next) {
     try {
       const supabaseUser = await validateSupabaseAccessToken(supabaseAuth, bearerToken(req));
-      const session = await createCheckoutSession(deps, supabaseUser, req.body && req.body.packId, {
-        successUrl: `${config.appUrl}/billing/success`,
-        cancelUrl: `${config.appUrl}/billing/cancel`
-      });
+      const session = await createCheckoutSession(deps, supabaseUser, req.body && req.body.packId);
       res.status(201).json(session);
     } catch (error) {
       next(error);

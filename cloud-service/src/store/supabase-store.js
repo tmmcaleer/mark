@@ -1,7 +1,30 @@
 const { HttpError } = require("../http-error");
 
+function parseErrorHint(error) {
+  if (!error || !error.hint) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(error.hint);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (parseError) {
+    return null;
+  }
+}
+
 function requireData(data, error) {
   if (error) {
+    const hint = parseErrorHint(error);
+    if ((hint && hint.code === "INSUFFICIENT_CREDITS") || /Buy more Mark credits/i.test(error.message || "")) {
+      throw new HttpError(error.message || "Buy more Mark credits to analyze this media", {
+        code: "INSUFFICIENT_CREDITS",
+        statusCode: 402,
+        details: hint ? {
+          balanceMinutes: Number(hint.balanceMinutes) || 0,
+          requiredMinutes: Number(hint.requiredMinutes) || 0
+        } : undefined
+      });
+    }
     throw new HttpError(error.message, {
       code: error.code || "SUPABASE_ERROR",
       statusCode: 500,
@@ -45,7 +68,15 @@ class SupabaseStore {
         statusCode: 410
       });
     }
+    if (existing.status !== "pending") {
+      throw new HttpError("Device sign-in session was already authorized", {
+        code: "DEVICE_SESSION_ALREADY_AUTHORIZED",
+        statusCode: 409
+      });
+    }
 
+    await this.ensureProfile(input.userId, input.email || "");
+    const now = new Date().toISOString();
     const { data, error } = await this.supabase
       .from("device_sessions")
       .update({
@@ -53,13 +84,27 @@ class SupabaseStore {
         user_id: input.userId,
         email: input.email || "",
         mark_session_token: input.markSessionToken,
-        authorized_at: new Date().toISOString()
+        authorized_at: now
       })
       .eq("device_code_hash", input.deviceCodeHash)
+      .eq("status", "pending")
+      .gt("expires_at", now)
       .select("*")
-      .single();
+      .maybeSingle();
     requireData(data, error);
-    await this.ensureProfile(input.userId, input.email || "");
+    if (!data) {
+      const latest = await this.pollDeviceSession(input.deviceCodeHash);
+      if (latest.status === "expired") {
+        throw new HttpError("Device sign-in session expired", {
+          code: "DEVICE_SESSION_EXPIRED",
+          statusCode: 410
+        });
+      }
+      throw new HttpError("Device sign-in session was already authorized", {
+        code: "DEVICE_SESSION_ALREADY_AUTHORIZED",
+        statusCode: 409
+      });
+    }
     return data;
   }
 
@@ -77,9 +122,11 @@ class SupabaseStore {
         .from("device_sessions")
         .update({ status: "expired" })
         .eq("id", data.id)
+        .eq("status", "pending")
         .select("*")
-        .single();
-      return requireData(updated.data, updated.error);
+        .maybeSingle();
+      requireData(updated.data, updated.error);
+      return updated.data || this.pollDeviceSession(deviceCodeHash);
     }
     return data;
   }

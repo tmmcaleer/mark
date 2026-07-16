@@ -2,11 +2,25 @@ const Stripe = require("stripe");
 
 const { HttpError } = require("./http-error");
 
+function displayPrice(amountCents, currency) {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: String(currency).toUpperCase()
+    }).format(Number(amountCents) / 100);
+  } catch (error) {
+    return `${(Number(amountCents) / 100).toFixed(2)} ${String(currency).toUpperCase()}`;
+  }
+}
+
 function publicCreditPack(pack) {
   return {
     id: pack.id,
     label: pack.label,
-    minutes: pack.minutes
+    minutes: pack.minutes,
+    amountCents: pack.amountCents,
+    currency: pack.currency,
+    displayPrice: displayPrice(pack.amountCents, pack.currency)
   };
 }
 
@@ -53,10 +67,13 @@ async function createCheckoutSession(deps, user, packId, urls = {}) {
     metadata: {
       userId: user.id,
       packId: pack.id,
-      creditMinutes: String(pack.minutes)
+      packLabel: pack.label,
+      creditMinutes: String(pack.minutes),
+      amountCents: String(pack.amountCents),
+      currency: pack.currency
     },
-    success_url: urls.successUrl || `${deps.config.appUrl}/billing/success`,
-    cancel_url: urls.cancelUrl || `${deps.config.appUrl}/billing/cancel`,
+    success_url: urls.successUrl || `${deps.config.webAppUrl || deps.config.appUrl}/billing/success`,
+    cancel_url: urls.cancelUrl || `${deps.config.webAppUrl || deps.config.appUrl}/billing/cancel`,
     automatic_tax: {
       enabled: true
     }
@@ -97,14 +114,16 @@ function constructWebhookEvent(deps, req) {
 }
 
 async function handleStripeEvent(deps, event) {
-  if (event.type !== "checkout.session.completed") {
+  const fulfillsCheckout = event.type === "checkout.session.completed"
+    || event.type === "checkout.session.async_payment_succeeded";
+  if (!fulfillsCheckout) {
     return {
       ignored: true
     };
   }
 
   const session = event.data.object;
-  if (session.payment_status && session.payment_status !== "paid") {
+  if (event.type === "checkout.session.completed" && session.payment_status && session.payment_status !== "paid") {
     return {
       ignored: true,
       reason: "payment_not_paid"
@@ -112,7 +131,25 @@ async function handleStripeEvent(deps, event) {
   }
 
   const metadata = session.metadata || {};
-  const pack = findCreditPack(deps.config, metadata.packId);
+  const packId = String(metadata.packId || "").trim();
+  if (!packId) {
+    throw new HttpError("Checkout session is missing Mark pack metadata", {
+      code: "CHECKOUT_PACK_MISSING",
+      statusCode: 400
+    });
+  }
+  let minutes;
+  if (metadata.creditMinutes === undefined || metadata.creditMinutes === null || metadata.creditMinutes === "") {
+    minutes = findCreditPack(deps.config, packId).minutes;
+  } else {
+    minutes = Number(metadata.creditMinutes);
+    if (!Number.isInteger(minutes) || minutes <= 0) {
+      throw new HttpError("Checkout session has invalid Mark credit metadata", {
+        code: "CHECKOUT_CREDITS_INVALID",
+        statusCode: 400
+      });
+    }
+  }
   const userId = metadata.userId || session.client_reference_id;
   if (!userId) {
     throw new HttpError("Checkout session is missing Mark user metadata", {
@@ -124,8 +161,8 @@ async function handleStripeEvent(deps, event) {
   return deps.store.grantCreditPack({
     userId,
     email: session.customer_details && session.customer_details.email || session.customer_email || "",
-    minutes: pack.minutes,
-    packId: pack.id,
+    minutes,
+    packId,
     stripeEventId: event.id,
     eventType: event.type,
     checkoutSessionId: session.id,

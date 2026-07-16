@@ -57,6 +57,12 @@ class MemoryStore {
         statusCode: 410
       });
     }
+    if (record.status !== "pending") {
+      throw new HttpError("Device sign-in session was already authorized", {
+        code: "DEVICE_SESSION_ALREADY_AUTHORIZED",
+        statusCode: 409
+      });
+    }
 
     record.status = "authorized";
     record.userId = input.userId;
