@@ -165,6 +165,7 @@ Cloud service environment variables:
 - `SUPABASE_URL` and `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` - Server-side Supabase access.
 - `SUPABASE_PUBLISHABLE_KEY` - Browser account/device sign-in page key.
 - `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` - Checkout and webhook verification.
+- `STRIPE_AUTOMATIC_TAX_ENABLED` - Opt in to Stripe Tax after the Stripe account has a verified head-office address. Defaults to `false`.
 - `MARK_CLOUD_APP_URL` - Public cloud API URL, such as `https://mark-cloud-api.onrender.com`.
 - `MARK_WEB_APP_URL` - Trusted customer web app origin used for device sign-in and Stripe return URLs.
 - `MARK_CORS_ORIGINS` - Optional comma- or newline-separated additional customer web origins.

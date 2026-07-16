@@ -73,11 +73,14 @@ async function createCheckoutSession(deps, user, packId, urls = {}) {
       currency: pack.currency
     },
     success_url: urls.successUrl || `${deps.config.webAppUrl || deps.config.appUrl}/billing/success`,
-    cancel_url: urls.cancelUrl || `${deps.config.webAppUrl || deps.config.appUrl}/billing/cancel`,
-    automatic_tax: {
-      enabled: true
-    }
+    cancel_url: urls.cancelUrl || `${deps.config.webAppUrl || deps.config.appUrl}/billing/cancel`
   };
+
+  if (deps.config.stripeAutomaticTaxEnabled) {
+    createOptions.automatic_tax = {
+      enabled: true
+    };
+  }
 
   if (customerId) {
     createOptions.customer = customerId;

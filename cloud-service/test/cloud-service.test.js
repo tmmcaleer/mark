@@ -41,6 +41,7 @@ function config() {
     supabaseSecretKey: "",
     stripeSecretKey: "sk_test_mock",
     stripeWebhookSecret: "whsec_test",
+    stripeAutomaticTaxEnabled: false,
     twelveLabsApiKey: "tl-test",
     twelveLabsBaseUrl: "https://api.twelvelabs.test",
     uploadDir: require("node:os").tmpdir(),
@@ -56,6 +57,7 @@ function config() {
 }
 
 test("default credit packs expose the production catalog without Stripe price ids", function () {
+  assert.equal(defaultConfig.stripeAutomaticTaxEnabled, false);
   assert.deepEqual(defaultConfig.creditPacks.map(function publicFields(pack) {
     return {
       id: pack.id,
@@ -206,6 +208,7 @@ test("checkout sessions use server-side pack price ids", async function () {
   assert.equal(calls[0].metadata.currency, "usd");
   assert.equal(calls[0].metadata.packLabel, "Starter");
   assert.equal(calls[0].success_url, "https://markmarks.app/billing/success");
+  assert.equal(calls[0].automatic_tax, undefined);
   assert.deepEqual(session.pack, {
     id: "starter",
     label: "Starter",
@@ -214,6 +217,18 @@ test("checkout sessions use server-side pack price ids", async function () {
     currency: "usd",
     displayPrice: "$4.99"
   });
+
+  const taxConfig = config();
+  taxConfig.stripeAutomaticTaxEnabled = true;
+  await createCheckoutSession({
+    config: taxConfig,
+    store,
+    stripe
+  }, {
+    id: "00000000-0000-4000-8000-000000000001",
+    email: "editor@example.com"
+  }, "starter");
+  assert.deepEqual(calls[1].automatic_tax, { enabled: true });
 });
 
 test("browser account dashboard endpoints use Supabase sessions", async function () {

@@ -45,6 +45,21 @@ function stringFromEnv(name, fallback) {
   return text || fallback;
 }
 
+function booleanFromEnv(name, fallback) {
+  const value = process.env[name];
+  if (value === undefined) {
+    return fallback;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  throw new Error(`${name} must be true or false`);
+}
+
 function listFromEnv(name) {
   return String(process.env[name] || "")
     .split(/[\n,]/)
@@ -135,6 +150,7 @@ const config = {
   supabaseSecretKey: stringFromEnv("SUPABASE_SECRET_KEY", stringFromEnv("SUPABASE_SERVICE_ROLE_KEY", "")),
   stripeSecretKey: stringFromEnv("STRIPE_SECRET_KEY", ""),
   stripeWebhookSecret: stringFromEnv("STRIPE_WEBHOOK_SECRET", ""),
+  stripeAutomaticTaxEnabled: booleanFromEnv("STRIPE_AUTOMATIC_TAX_ENABLED", false),
   twelveLabsApiKey: stringFromEnv("TWELVELABS_API_KEY", ""),
   twelveLabsBaseUrl: stringFromEnv("TWELVELABS_API_BASE_URL", "https://api.twelvelabs.io/v1.3"),
   sessionSecret: stringFromEnv("MARK_SESSION_SECRET", "mark-dev-session-secret-change-me"),
